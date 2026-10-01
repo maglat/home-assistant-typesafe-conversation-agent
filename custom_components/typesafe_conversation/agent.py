@@ -1,4 +1,4 @@
-"""The request pipeline: one Jev call, then code decides.
+"""The request pipeline: one decision call, then code decides.
 
 Everything the router might need is asked in a single API call, including the
 branches that will turn out to be irrelevant. Measured against jev-1.13.0, each
@@ -39,10 +39,10 @@ from .extraction import extract
 from .llm_backend import LLMBackend, LLMBackendError
 from .router import Plan, Route, route, should_try_llm_answer
 from .system_one import (
-    SystemOneClient,
-    SystemOneError,
-    SystemOneRequestError,
-    SystemOneResponse,
+    DecisionClient,
+    DecisionError,
+    DecisionRequestError,
+    DecisionResponse,
 )
 
 
@@ -56,20 +56,20 @@ class AgentSettings:
 
 
 class TypeSafeAgent:
-    """Runs one utterance through Jev and carries out the result."""
+    """Runs one utterance through the decision model and carries out the result."""
 
     def __init__(
         self,
         hass: HomeAssistant,
         catalog: EntityCatalog,
-        jev: SystemOneClient,
+        decision_client: DecisionClient,
         llm: LLMBackend | None,
         settings: AgentSettings,
         traces: Any = None,
     ) -> None:
         self.hass = hass
         self.catalog = catalog
-        self.jev = jev
+        self.decision_client = decision_client
         self.llm = llm
         self.settings = settings
         self._traces = traces
@@ -98,11 +98,11 @@ class TypeSafeAgent:
         speaker_area_id = self._speaker_area(user_input)
         try:
             response, entities = await self._ask(text, speaker_area_id, chat_log)
-        except SystemOneRequestError:
+        except DecisionRequestError:
             # Our question builder produced something the API rejected. Already
             # logged with the offending field; behave as if Jev were down.
             return await self._fallback(user_input, chat_log, None)
-        except SystemOneError as err:
+        except DecisionError as err:
             LOGGER.warning(
                 "System One unavailable (%s); using the fallback ladder", err
             )
@@ -182,7 +182,7 @@ class TypeSafeAgent:
         text: str,
         speaker_area_id: str | None,
         chat_log: conversation.ChatLog | None,
-    ) -> tuple[SystemOneResponse, tuple]:
+    ) -> tuple[DecisionResponse, tuple]:
         entities, _narrowed = self.catalog.prefilter(text, speaker_area_id)
         extraction = extract(
             text,
@@ -213,7 +213,7 @@ class TypeSafeAgent:
         if chat_log is not None and (history := self._history(chat_log)):
             state["conversation"] = history
 
-        return await self.jev.async_ask(state, questions), entities
+        return await self.decision_client.async_ask(state, questions), entities
 
     def _structural_questions(self, entities: tuple) -> dict[str, Any]:
         """Cache the catalog-derived questions against the catalog generation.
@@ -247,7 +247,7 @@ class TypeSafeAgent:
     async def _carry_out(
         self,
         plan: Plan,
-        response: SystemOneResponse,
+        response: DecisionResponse,
         user_input: conversation.ConversationInput,
         chat_log: conversation.ChatLog,
     ) -> intent.IntentResponse:
@@ -435,7 +435,7 @@ class TypeSafeAgent:
             response, entities = await self._ask(
                 text, self._speaker_area(user_input), chat_log
             )
-        except SystemOneError:
+        except DecisionError:
             return await self._fallback(user_input, chat_log, None)
         plan = route(
             response,
@@ -463,7 +463,7 @@ class TypeSafeAgent:
         self,
         user_input: conversation.ConversationInput,
         chat_log: conversation.ChatLog,
-        response: SystemOneResponse | None,
+        response: DecisionResponse | None,
     ) -> intent.IntentResponse:
         """hassil, then the LLM, then admit defeat.
 

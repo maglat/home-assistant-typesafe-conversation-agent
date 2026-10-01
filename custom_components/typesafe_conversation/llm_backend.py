@@ -308,7 +308,7 @@ class OpenAICompatBackend(LLMBackend):
         started = time.monotonic()
         data = await _post_json(
             self._session,
-            f"{self._base_url}/v1/chat/completions",
+            _chat_completions_url(self._base_url),
             payload,
             headers,
             timeout,
@@ -426,6 +426,20 @@ def _log_exchange(
     if (total := metrics.get("total_s")) is not None:
         lines.append(f"  total     : {total:.2f}s (server-side)")
     LOGGER.debug("\n".join(lines))
+
+
+def _chat_completions_url(base_url: str) -> str:
+    """Accept base URLs with or without a trailing ``/v1``.
+
+    Users paste whatever their server's docs show - ``http://host:8000`` from
+    vLLM, ``http://host:8080/v1`` from llama.cpp - and both are correct.
+    """
+    trimmed = base_url.rstrip("/")
+    return (
+        f"{trimmed}/chat/completions"
+        if trimmed.endswith("/v1")
+        else f"{trimmed}/v1/chat/completions"
+    )
 
 
 async def _post_json(

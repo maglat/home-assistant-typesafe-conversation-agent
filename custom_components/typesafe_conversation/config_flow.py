@@ -33,6 +33,10 @@ from .const import (
     CONF_ALWAYS_CONFIRM_RISKY,
     CONF_API_KEY,
     CONF_BYPASS_LOCAL_INTENTS,
+    CONF_DECISION_API_KEY,
+    CONF_DECISION_BACKEND,
+    CONF_DECISION_BASE_URL,
+    CONF_DECISION_TIMEOUT,
     CONF_INLINE_ENTITY_DESCRIPTIONS,
     CONF_LLM_API_KEY,
     CONF_LLM_BACKEND,
@@ -40,53 +44,68 @@ from .const import (
     CONF_LLM_MODEL,
     CONF_LLM_TIMEOUT,
     CONF_MODEL,
+    DECISION_OPENAI,
+    DECISION_TYPESAFE,
     DEFAULT_ALWAYS_CONFIRM_RISKY,
+    DEFAULT_DECISION_TIMEOUT,
     DEFAULT_MODEL,
     DEFAULT_OLLAMA_URL,
     DOMAIN,
     LOGGER,
     TYPESAFE_CONSOLE_URL,
 )
-from .system_one import SystemOneAuthError, SystemOneClient, SystemOneError
-
-STEP_USER_SCHEMA = vol.Schema(
-    {
-        vol.Required(CONF_API_KEY): TextSelector(
-            TextSelectorConfig(type=TextSelectorType.PASSWORD)
-        ),
-        vol.Optional(CONF_MODEL, default=DEFAULT_MODEL): TextSelector(),
-    }
+from .system_one import (
+    DecisionAuthError,
+    DecisionClient,
+    DecisionError,
 )
 
-STEP_LLM_SCHEMA = vol.Schema(
-    {
-        vol.Optional(CONF_LLM_BACKEND, default=BACKEND_OLLAMA): SelectSelector(
-            SelectSelectorConfig(
-                options=[
-                    SelectOptionDict(value=BACKEND_OLLAMA, label="Ollama"),
-                    SelectOptionDict(
-                        value=BACKEND_OPENAI_COMPAT,
-                        label="OpenAI-compatible (OpenRouter, vLLM, ...)",
-                    ),
-                ]
-            )
-        ),
-        vol.Optional(CONF_LLM_BASE_URL, default=DEFAULT_OLLAMA_URL): TextSelector(),
-        vol.Optional(CONF_LLM_MODEL): TextSelector(),
-        vol.Optional(CONF_LLM_API_KEY): TextSelector(
-            TextSelectorConfig(type=TextSelectorType.PASSWORD)
-        ),
-        vol.Optional(CONF_LLM_TIMEOUT, default=ANSWER_TIMEOUT): NumberSelector(
-            NumberSelectorConfig(min=5, max=180, step=5, unit_of_measurement="s")
-        ),
+_BACKEND_OPTIONS = [
+    SelectOptionDict(value=DECISION_TYPESAFE, label="TypeSafe hosted (Jev)"),
+    SelectOptionDict(
+        value=DECISION_OPENAI,
+        label="OpenAI-compatible (Clef, Von, Laya, vLLM, Ollama, ...)",
+    ),
+]
+
+
+def _decision_schema(backend: str | None) -> vol.Schema:
+    """The fields that follow the backend choice.
+
+    The hosted backend needs only an API key; the OpenAI-compatible one takes
+    a base URL, a model name and an optional key. The model field is shown for
+    both, because TypeSafe will host more than Jev.
+    """
+    fields: dict[Any, Any] = {
+        vol.Required(
+            CONF_DECISION_BACKEND, default=backend or DECISION_TYPESAFE
+        ): SelectSelector(SelectSelectorConfig(options=_BACKEND_OPTIONS)),
     }
-)
+    if backend == DECISION_OPENAI:
+        fields[vol.Required(CONF_DECISION_BASE_URL)] = TextSelector()
+        fields[vol.Required(CONF_MODEL)] = TextSelector()
+        fields[vol.Optional(CONF_DECISION_API_KEY)] = TextSelector(
+            TextSelectorConfig(type=TextSelectorType.PASSWORD)
+        )
+        fields[
+            vol.Optional(CONF_DECISION_TIMEOUT, default=DEFAULT_DECISION_TIMEOUT)
+        ] = NumberSelector(
+            NumberSelectorConfig(min=2, max=120, step=1, unit_of_measurement="s")
+        )
+    else:
+        fields[vol.Optional(CONF_MODEL, default=DEFAULT_MODEL)] = TextSelector()
+        fields[vol.Required(CONF_API_KEY)] = TextSelector(
+            TextSelectorConfig(type=TextSelectorType.PASSWORD)
+        )
+    return vol.Schema(fields)
 
 
 class TypeSafeConfigFlow(ConfigFlow, domain=DOMAIN):
-    """Set up the TypeSafe credentials, then the optional LLM."""
+    """Pick the decision backend, then the optional prose LLM."""
 
     VERSION = 1
+    """Deliberately 1: every field added for the pluggable backends is
+    optional, so entries created before them stay valid without a migration."""
 
     def __init__(self) -> None:
         self._data: dict[str, Any] = {}
@@ -97,27 +116,26 @@ class TypeSafeConfigFlow(ConfigFlow, domain=DOMAIN):
     ) -> ConfigFlowResult:
         errors: dict[str, str] = {}
         if user_input is not None:
-            client = SystemOneClient(
-                async_get_clientsession(self.hass),
-                user_input[CONF_API_KEY],
-                user_input.get(CONF_MODEL, DEFAULT_MODEL),
-            )
-            try:
-                await client.async_validate()
-            except SystemOneAuthError:
-                errors["base"] = "invalid_auth"
-            except SystemOneError:
-                errors["base"] = "cannot_connect"
-            except Exception:
-                LOGGER.exception("Unexpected error validating the TypeSafe key")
+            client = _build_validator(async_get_clientsession(self.hass), user_input)
+            if client is None:
                 errors["base"] = "unknown"
             else:
-                self._data = dict(user_input)
-                return await self.async_step_llm()
+                try:
+                    await client.async_validate()
+                except DecisionAuthError:
+                    errors["base"] = "invalid_auth"
+                except DecisionError:
+                    errors["base"] = "cannot_connect"
+                except Exception:
+                    LOGGER.exception("Unexpected error validating the decision backend")
+                    errors["base"] = "unknown"
+                else:
+                    self._data = dict(user_input)
+                    return await self.async_step_llm()
 
         return self.async_show_form(
             step_id="user",
-            data_schema=STEP_USER_SCHEMA,
+            data_schema=_decision_schema((user_input or {}).get(CONF_DECISION_BACKEND)),
             errors=errors,
             # hassfest rejects a literal URL inside a translated string, so the
             # console link is supplied here instead.
@@ -160,20 +178,18 @@ class TypeSafeConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
         entry = self._get_reauth_entry()
         if user_input is not None:
-            client = SystemOneClient(
-                async_get_clientsession(self.hass),
-                user_input[CONF_API_KEY],
-                entry.data.get(CONF_MODEL, DEFAULT_MODEL),
-            )
+            data = {**entry.data, **user_input}
+            client = _build_validator(async_get_clientsession(self.hass), data)
             try:
-                await client.async_validate()
-            except SystemOneAuthError:
+                if client is not None:
+                    await client.async_validate()
+            except DecisionAuthError:
                 errors["base"] = "invalid_auth"
-            except SystemOneError:
+            except DecisionError:
                 errors["base"] = "cannot_connect"
             else:
                 return self.async_update_reload_and_abort(
-                    entry, data_updates={CONF_API_KEY: user_input[CONF_API_KEY]}
+                    entry, data_updates=user_input
                 )
         return self.async_show_form(
             step_id="reauth_confirm",
@@ -194,6 +210,38 @@ class TypeSafeConfigFlow(ConfigFlow, domain=DOMAIN):
         cls, config_entry: ConfigEntry
     ) -> dict[str, type[ConfigSubentryFlow]]:
         return {"conversation": TypeSafeSubentryFlowHandler}
+
+
+def _build_validator(session: Any, data: dict[str, Any]) -> DecisionClient | None:
+    """Build whichever client can validate the chosen backend's credentials."""
+    from .system_one import create_decision_client
+
+    return create_decision_client(session, data)
+
+
+STEP_LLM_SCHEMA = vol.Schema(
+    {
+        vol.Optional(CONF_LLM_BACKEND, default=BACKEND_OLLAMA): SelectSelector(
+            SelectSelectorConfig(
+                options=[
+                    SelectOptionDict(value=BACKEND_OLLAMA, label="Ollama"),
+                    SelectOptionDict(
+                        value=BACKEND_OPENAI_COMPAT,
+                        label="OpenAI-compatible (OpenRouter, vLLM, ...)",
+                    ),
+                ]
+            )
+        ),
+        vol.Optional(CONF_LLM_BASE_URL, default=DEFAULT_OLLAMA_URL): TextSelector(),
+        vol.Optional(CONF_LLM_MODEL): TextSelector(),
+        vol.Optional(CONF_LLM_API_KEY): TextSelector(
+            TextSelectorConfig(type=TextSelectorType.PASSWORD)
+        ),
+        vol.Optional(CONF_LLM_TIMEOUT, default=ANSWER_TIMEOUT): NumberSelector(
+            NumberSelectorConfig(min=5, max=180, step=5, unit_of_measurement="s")
+        ),
+    }
+)
 
 
 class TypeSafeSubentryFlowHandler(ConfigSubentryFlow):

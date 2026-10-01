@@ -22,9 +22,10 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import async_track_time_interval
 
 from .const import (
-    CONF_API_KEY,
+    CONF_DECISION_BACKEND,
     CONF_MODEL,
     CONVERSATION_DOMAIN,
+    DECISION_TYPESAFE,
     DEFAULT_MODEL,
     DOMAIN,
     TRACE_HISTORY,
@@ -32,7 +33,13 @@ from .const import (
 )
 from .entities import EntityCatalog
 from .llm_backend import LLMBackend, create_backend
-from .system_one import SystemOneAuthError, SystemOneClient, SystemOneError
+from .system_one import (
+    DecisionAuthError,
+    DecisionClient,
+    DecisionError,
+    OpenAIDecisionClient,
+    create_decision_client,
+)
 
 PLATFORMS = [Platform.CONVERSATION]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
@@ -42,7 +49,7 @@ CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 class TypeSafeRuntimeData:
     """Everything one config entry needs at runtime."""
 
-    client: SystemOneClient
+    client: DecisionClient
     catalog: EntityCatalog
     llm: LLMBackend | None
     model: str
@@ -65,18 +72,26 @@ type TypeSafeConfigEntry = ConfigEntry[TypeSafeRuntimeData]
 async def async_setup_entry(hass: HomeAssistant, entry: TypeSafeConfigEntry) -> bool:
     """Set up TypeSafe Conversation from a config entry."""
     session = async_get_clientsession(hass)
-    client = SystemOneClient(
-        session,
-        entry.data[CONF_API_KEY],
-        entry.data.get(CONF_MODEL, DEFAULT_MODEL),
-    )
+    client = create_decision_client(session, {**entry.data})
+    if client is None:
+        raise ConfigEntryNotReady("No usable decision backend configured")
 
-    try:
-        await client.async_validate()
-    except SystemOneAuthError as err:
-        raise ConfigEntryAuthFailed(str(err)) from err
-    except SystemOneError as err:
-        raise ConfigEntryNotReady(f"Could not reach TypeSafe: {err}") from err
+    # Only the hosted backend has a key to check; a self-hosted endpoint is
+    # validated by reachability, and a failure there is worth a retry.
+    if entry.data.get(CONF_DECISION_BACKEND, DECISION_TYPESAFE) == DECISION_TYPESAFE:
+        try:
+            await client.async_validate()
+        except DecisionAuthError as err:
+            raise ConfigEntryAuthFailed(str(err)) from err
+        except DecisionError as err:
+            raise ConfigEntryNotReady(f"Could not reach TypeSafe: {err}") from err
+    elif isinstance(client, OpenAIDecisionClient):
+        try:
+            await client.async_validate()
+        except DecisionError as err:
+            raise ConfigEntryNotReady(
+                f"Could not reach the decision model: {err}"
+            ) from err
 
     store = hass.data.setdefault(DOMAIN, {})
     catalog: EntityCatalog | None = store.get("catalog")

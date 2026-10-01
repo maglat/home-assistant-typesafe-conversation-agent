@@ -17,13 +17,23 @@ from homeassistant.core import HomeAssistant
 from . import TypeSafeConfigEntry
 from .const import (
     CONF_API_KEY,
+    CONF_DECISION_API_KEY,
+    CONF_DECISION_BASE_URL,
     CONF_LLM_API_KEY,
     CONF_LLM_BASE_URL,
 )
 
-# The base URL is redacted too: for a self-hosted model it is usually a private
-# hostname, and diagnostics get pasted into public issue threads.
-REDACT = {CONF_API_KEY, CONF_LLM_API_KEY, CONF_LLM_BASE_URL, "api_key", "token"}
+# The base URLs are redacted too: for a self-hosted model they are usually a
+# private hostname, and diagnostics get pasted into public issue threads.
+REDACT = {
+    CONF_API_KEY,
+    CONF_DECISION_API_KEY,
+    CONF_DECISION_BASE_URL,
+    CONF_LLM_API_KEY,
+    CONF_LLM_BASE_URL,
+    "api_key",
+    "token",
+}
 
 
 async def async_get_config_entry_diagnostics(

@@ -1,8 +1,9 @@
-"""The System One client: request shape, error mapping, retries, circuit breaker."""
+"""The decision clients: request shape, error mapping, retries, circuit breaker."""
 
 from __future__ import annotations
 
 import asyncio
+import json
 
 import pytest
 from pytest_homeassistant_custom_component.test_util.aiohttp import (
@@ -10,13 +11,22 @@ from pytest_homeassistant_custom_component.test_util.aiohttp import (
     mock_aiohttp_client,
 )
 
-from custom_components.typesafe_conversation.const import TYPESAFE_API_URL
+from custom_components.typesafe_conversation.const import (
+    CONF_DECISION_API_KEY,
+    CONF_DECISION_BACKEND,
+    CONF_DECISION_BASE_URL,
+    CONF_MODEL,
+    DECISION_OPENAI,
+    TYPESAFE_API_URL,
+)
 from custom_components.typesafe_conversation.system_one import (
     ChoiceAnswer,
-    SystemOneAuthError,
-    SystemOneClient,
-    SystemOneRequestError,
-    SystemOneUnavailableError,
+    DecisionAuthError,
+    DecisionRequestError,
+    DecisionUnavailableError,
+    OpenAIDecisionClient,
+    TypeSafeDecisionClient,
+    create_decision_client,
 )
 
 OK = {
@@ -40,6 +50,14 @@ OK = {
     "usage": {"input_tokens": 6482, "output_tokens": 210},
 }
 
+QUESTIONS = {
+    "category": {
+        "type": "choice",
+        "criteria": {"command": "run a device", "query": "ask about state"},
+    },
+    "compound": {"type": "noul"},
+}
+
 
 @pytest.fixture(name="mocker")
 def mocker_fixture():
@@ -50,7 +68,7 @@ def mocker_fixture():
 @pytest.fixture(name="client")
 async def client_fixture(mocker: AiohttpClientMocker):
     session = mocker.create_session(asyncio.get_running_loop())
-    return SystemOneClient(session, "sk-test", "jev-latest")
+    return TypeSafeDecisionClient(session, "sk-test", "jev-latest")
 
 
 async def test_request_shape_and_typed_answers(client, mocker):
@@ -80,7 +98,7 @@ def test_margin_catches_a_confident_looking_tie():
 
 async def test_auth_failure_is_not_retried(client, mocker):
     mocker.post(TYPESAFE_API_URL, status=401, text="nope")
-    with pytest.raises(SystemOneAuthError):
+    with pytest.raises(DecisionAuthError):
         await client.async_ask({}, {})
     assert len(mocker.mock_calls) == 1
 
@@ -88,14 +106,14 @@ async def test_auth_failure_is_not_retried(client, mocker):
 async def test_validation_failure_is_not_retried(client, mocker):
     """A 422 is our bug, not a transient one - retrying just wastes time."""
     mocker.post(TYPESAFE_API_URL, status=422, text='{"detail":"questions.x.criteria"}')
-    with pytest.raises(SystemOneRequestError, match="criteria"):
+    with pytest.raises(DecisionRequestError, match="criteria"):
         await client.async_ask({}, {})
     assert len(mocker.mock_calls) == 1
 
 
 async def test_rate_limit_is_retried_then_gives_up(client, mocker):
     mocker.post(TYPESAFE_API_URL, status=429, text="slow down")
-    with pytest.raises(SystemOneUnavailableError):
+    with pytest.raises(DecisionUnavailableError):
         await client.async_ask({}, {})
     assert len(mocker.mock_calls) == 3, "three attempts, then the fallback ladder"
 
@@ -107,21 +125,138 @@ async def test_circuit_opens_after_repeated_failure(client, mocker):
     """
     mocker.post(TYPESAFE_API_URL, status=500, text="boom")
     for _ in range(3):
-        with pytest.raises(SystemOneUnavailableError):
+        with pytest.raises(DecisionUnavailableError):
             await client.async_ask({}, {})
     assert client.circuit_open
 
     before = len(mocker.mock_calls)
-    with pytest.raises(SystemOneUnavailableError, match="circuit breaker"):
+    with pytest.raises(DecisionUnavailableError, match="circuit breaker"):
         await client.async_ask({}, {})
     assert len(mocker.mock_calls) == before, "no request while the circuit is open"
 
 
 async def test_success_resets_the_failure_count(client, mocker):
     mocker.post(TYPESAFE_API_URL, status=500, text="boom")
-    with pytest.raises(SystemOneUnavailableError):
+    with pytest.raises(DecisionUnavailableError):
         await client.async_ask({}, {})
     mocker.clear_requests()
     mocker.post(TYPESAFE_API_URL, json=OK)
     await client.async_ask({}, {})
     assert not client.circuit_open
+
+
+# --- the OpenAI-compatible decision backend -----------------------------------
+
+
+def _chat_body(content: str) -> dict:
+    return {
+        "model": "clef-flash",
+        "choices": [{"message": {"role": "assistant", "content": content}}],
+        "usage": {"prompt_tokens": 100, "completion_tokens": 30},
+    }
+
+
+GOOD_REPLY = json.dumps(
+    {
+        "category": {
+            "choice": "command",
+            "probabilities": {"command": 0.9, "query": 0.1},
+        },
+        "compound": {"noul": 0.05},
+    }
+)
+
+
+@pytest.fixture(name="openai_client")
+async def openai_client_fixture(mocker: AiohttpClientMocker):
+    session = mocker.create_session(asyncio.get_running_loop())
+    return OpenAIDecisionClient(
+        session, "http://127.0.0.1:8000", "clef-flash", timeout=5.0
+    )
+
+
+async def test_openai_backend_parses_a_strict_reply(openai_client, mocker):
+    mocker.post(
+        "http://127.0.0.1:8000/v1/chat/completions", json=_chat_body(GOOD_REPLY)
+    )
+    response = await openai_client.async_ask({"request": {"text": "hi"}}, QUESTIONS)
+
+    _method, url, body, _headers = mocker.mock_calls[0]
+    assert str(url).endswith("/v1/chat/completions")
+    assert body["model"] == "clef-flash"
+    assert "category" in body["messages"][-1]["content"]
+
+    assert response.choice("category").choice == "command"
+    assert response.choice("category").confidence == pytest.approx(0.8, abs=0.01)
+    assert response.noul("compound") == 0.05
+
+
+async def test_openai_backend_tolerates_fenced_prose(openai_client, mocker):
+    fenced = "Here you go:\n```json\n" + GOOD_REPLY + "\n```"
+    mocker.post("http://127.0.0.1:8000/v1/chat/completions", json=_chat_body(fenced))
+    response = await openai_client.async_ask({}, QUESTIONS)
+    assert response.choice("category").choice == "command"
+
+
+async def test_openai_backend_accepts_bare_labels(openai_client, mocker):
+    """A weaker model that answers {"category": "command"} still routes."""
+    bare = json.dumps({"category": "command", "compound": 0.1})
+    mocker.post("http://127.0.0.1:8000/v1/chat/completions", json=_chat_body(bare))
+    response = await openai_client.async_ask({}, QUESTIONS)
+    assert response.choice("category").choice == "command"
+    assert response.noul("compound") == 0.1
+
+
+async def test_openai_backend_maps_an_unknown_label_to_flat(openai_client, mocker):
+    """An option the question never offered must not look confident."""
+    bad = json.dumps({"category": "sing_a_song", "compound": 0.1})
+    mocker.post("http://127.0.0.1:8000/v1/chat/completions", json=_chat_body(bad))
+    response = await openai_client.async_ask({}, QUESTIONS)
+    answer = response.choice("category")
+    assert answer.choice == "command"  # first option, flat distribution
+    assert answer.confidence == 0.0, "flat distribution must not look solid"
+
+
+async def test_openai_backend_retries_on_5xx(openai_client, mocker):
+    mocker.post("http://127.0.0.1:8000/v1/chat/completions", status=500, text="boom")
+    with pytest.raises(DecisionUnavailableError):
+        await openai_client.async_ask({}, QUESTIONS)
+    assert len(mocker.mock_calls) == 3
+
+
+async def test_openai_backend_garbage_is_a_request_error(openai_client, mocker):
+    mocker.post(
+        "http://127.0.0.1:8000/v1/chat/completions",
+        json=_chat_body("I cannot answer that in JSON, sorry."),
+    )
+    with pytest.raises(DecisionRequestError):
+        await openai_client.async_ask({}, QUESTIONS)
+
+
+async def test_openai_validate_lists_models(openai_client, mocker):
+    mocker.get(
+        "http://127.0.0.1:8000/v1/models",
+        json={"data": [{"id": "clef-flash"}, {"id": "clef"}]},
+    )
+    assert await openai_client.async_validate() == ["clef-flash", "clef"]
+
+
+async def test_create_decision_client_openai_backend():
+    client = create_decision_client(
+        session=None,
+        settings={
+            CONF_DECISION_BACKEND: DECISION_OPENAI,
+            CONF_DECISION_BASE_URL: "http://127.0.0.1:8000",
+            CONF_MODEL: "clef-flash",
+            CONF_DECISION_API_KEY: "sk-local",
+        },
+    )
+    assert isinstance(client, OpenAIDecisionClient)
+    assert client.model == "clef-flash"
+
+
+async def test_create_decision_client_defaults_to_typesafe():
+    client = create_decision_client(
+        session=None, settings={"api_key": "sk-test", CONF_MODEL: "jev-latest"}
+    )
+    assert isinstance(client, TypeSafeDecisionClient)

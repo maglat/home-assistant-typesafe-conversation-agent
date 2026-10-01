@@ -5,12 +5,17 @@
 [![HACS: custom](https://img.shields.io/badge/HACS-custom-orange.svg)](https://hacs.xyz/docs/faq/custom_repositories/)
 
 A Home Assistant conversation agent that decides with a
-[TypeSafe System One](https://docs.typesafe.ai) model instead of an LLM.
+[TypeSafe System One](https://docs.typesafe.ai) model instead of an LLM — or
+with any OpenAI-compatible open-source model you point it at.
 
 > **Status: early.** Expect rough edges, and please
-> [report them](../../issues/new?template=bug_report.yml). Requires a
-> [TypeSafe](https://console.typesafe.ai/) API key, which is metered — see
-> [Cost](#cost).
+> [report them](../../issues/new?template=bug_report.yml). The default backend
+> uses a [TypeSafe](https://console.typesafe.ai/) API key, which is metered —
+> see [Cost](#cost). A self-hosted
+> [Clef](https://huggingface.co/Cloudflare/clef),
+> [Von](https://github.com/wfzyx/von) or
+> [Laya](https://huggingface.co/convaiinnovations/laya) endpoint works just as
+> well and is free.
 
 A System One model returns typed, calibrated judgements rather than text. Jev is
 the one available today and the default; the integration is not written around
@@ -90,6 +95,27 @@ spans in the utterance and Jev picks which one the user meant:
 Temperature units come from the entity, or failing that from your Home
 Assistant configuration. They are never asked of the model.
 
+## Decision backends
+
+The decision layer is pluggable. Pick the backend when adding the integration:
+
+| backend | what it talks to | needs |
+| --- | --- | --- |
+| **TypeSafe hosted** (default) | `https://api.typesafe.ai/v1/systemone` — Jev, and whatever TypeSafe hosts later | an API key |
+| **OpenAI-compatible** | any `/v1/chat/completions` endpoint: a self-hosted [Clef](https://huggingface.co/Cloudflare/clef) or [Clef-flash](https://huggingface.co/Cloudflare/clef-flash), [Von](https://github.com/wfzyx/von), [Laya](https://huggingface.co/convaiinnovations/laya), or a plain LLM served by vLLM, llama.cpp, Ollama, TabbyAPI, … | a base URL and a model name; an API key only if the endpoint wants one |
+
+The OpenAI-compatible backend sends the same state and question schema in one
+prompt and expects one JSON object back, keyed by question id, with a
+probability distribution per question. Confidence is derived from those
+probabilities with Jev's own formula, so every routing threshold behaves the
+same whichever backend answers. Models that answer loosely (bare labels
+instead of distributions, fenced JSON, prose around the object) are parsed
+tolerantly; an answer that cannot be repaired is treated as "not confident"
+and falls back, never as a wrong command.
+
+Base URLs are accepted with or without a trailing `/v1` — `http://host:8000`
+and `http://host:8000/v1` both work.
+
 ## What gets sent
 
 On every request this integration sends, to `https://api.typesafe.ai/v1/systemone`:
@@ -166,8 +192,12 @@ Set when you add the integration, and changeable afterwards under
 
 | option | default | what it does |
 | --- | --- | --- |
-| `api_key` | — | Your TypeSafe API key. Required. |
-| `model` | `jev-latest` | Which System One model to use. Tracks the newest Jev unless you pin one. |
+| `decision_backend` | `typesafe` | `typesafe` (hosted Jev) or `openai` (any OpenAI-compatible endpoint). |
+| `api_key` | — | Your TypeSafe API key. Required for the hosted backend. |
+| `model` | `jev-latest` | Which model to use — a TypeSafe model name, or the model name your own endpoint serves (`clef-flash`, `von`, …). |
+| `decision_base_url` | — | Root of your OpenAI-compatible endpoint, with or without `/v1`. |
+| `decision_api_key` | — | Only if that endpoint needs one. Redacted in diagnostics. |
+| `decision_timeout` | `12` s | Seconds for one decision request. Self-hosted models on modest hardware need more than the hosted API. |
 | `always_confirm_risky` | **on** | Ask before unlocking a door, opening a garage or disarming an alarm, however sure the model is. **Turning this off lets confident requests through silently** — the model's judgement becomes the only gate. |
 | `bypass_local_intents` | off | Send every command here, including ones Home Assistant's own sentence matcher recognises. Off is recommended; see [below](#leave-prefer-handling-commands-locally-on). |
 | `inline_entity_descriptions` | off | Describe every entity inside each question rather than once in the shared state. Roughly doubles the tokens. Only worth it if the agent picks the wrong device. |

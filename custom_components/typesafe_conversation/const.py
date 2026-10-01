@@ -1,9 +1,10 @@
 """Constants for the TypeSafe Conversation integration.
 
-The integration talks to TypeSafe's System One API, which serves a family of
-models. Jev is the one available today and the default; nothing outside
-DEFAULT_MODEL assumes it, so pointing CONF_MODEL at a later model is a config
-change rather than a code change.
+The decision layer talks to a System One API: Jev at TypeSafe by default, or
+any Jev-compatible endpoint (Cloudflare Clef, a self-hosted Clef, an OpenAI-
+compatible model behind the adapter) — nothing outside DEFAULT_MODEL assumes
+Jev, so pointing CONF_MODEL at a later model is a config change rather than a
+code change.
 """
 
 from __future__ import annotations
@@ -23,12 +24,13 @@ setup rebinds that name on the package, so ``conversation.DOMAIN`` inside this
 integration can silently become our own domain instead."""
 LOGGER: Final = logging.getLogger(__package__)
 
-# --- TypeSafe System One ------------------------------------------------------
+# --- System One decision API ---------------------------------------------------
 TYPESAFE_API_URL: Final = "https://api.typesafe.ai/v1/systemone"
 TYPESAFE_MODELS_URL: Final = "https://api.typesafe.ai/v1/models"
 TYPESAFE_CONSOLE_URL: Final = "https://console.typesafe.ai/"
 DEFAULT_MODEL: Final = "jev-latest"
-"""Jev is the only System One model today. An alias, so it follows releases."""
+"""Jev is the only hosted System One model today. An alias, so it follows releases."""
+
 API_TIMEOUT: Final = 6.0
 API_MAX_RETRIES: Final = 3
 API_BACKOFF: Final = (0.25, 0.75, 2.0)
@@ -41,6 +43,10 @@ CIRCUIT_RESET_SECONDS: Final = 60.0
 # --- Config keys -------------------------------------------------------------
 CONF_API_KEY: Final = "api_key"
 CONF_MODEL: Final = "model"
+CONF_DECISION_BACKEND: Final = "decision_backend"
+CONF_DECISION_BASE_URL: Final = "decision_base_url"
+CONF_DECISION_API_KEY: Final = "decision_api_key"
+CONF_DECISION_TIMEOUT: Final = "decision_timeout"
 CONF_LLM_BACKEND: Final = "llm_backend"
 CONF_LLM_BASE_URL: Final = "llm_base_url"
 CONF_LLM_MODEL: Final = "llm_model"
@@ -59,11 +65,24 @@ The model answers "unlock the front door" at confidence 1.0, so the confidence g
 below would let it through silently. One extra turn is cheap; an unlock the
 user did not intend is not. Turn this off to get the pure confidence gate."""
 
-BACKEND_OLLAMA: Final = "ollama"
-BACKEND_OPENAI_COMPAT: Final = "openai_compatible"
+DECISION_TYPESAFE: Final = "typesafe"
+DECISION_OPENAI: Final = "openai"
+
+DEFAULT_DECISION_BASE_URL: Final = TYPESAFE_API_URL
+"""Only used by the OpenAI-compatible decision backend."""
+DEFAULT_DECISION_TIMEOUT: Final = 12.0
+"""Seconds for one decision request.
+
+A hosted System One model answers in a few hundred milliseconds; a large
+self-hosted model on shared hardware needs more. The retries below multiply
+this, so the worst case is roughly timeout x API_MAX_RETRIES before the
+fallback ladder takes over.
+"""
 
 DEFAULT_OLLAMA_URL: Final = "http://localhost:11434"
 DEFAULT_OPENAI_COMPAT_URL: Final = "https://openrouter.ai/api"
+BACKEND_OLLAMA: Final = "ollama"
+BACKEND_OPENAI_COMPAT: Final = "openai_compatible"
 DEFAULT_LLM_REFERER: Final = (
     "https://github.com/the-sof/home-assistant-typesafe-conversation-agent"
 )
