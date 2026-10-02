@@ -23,9 +23,13 @@ from homeassistant.components import conversation
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import llm
-from voluptuous_openapi import convert
 
 from .const import LOGGER, MAX_TOOL_ROUNDS
+
+try:
+    from voluptuous_openapi import convert
+except ImportError:  # pragma: no cover - depends on the HA build
+    convert = None  # type: ignore[assignment]
 
 TOOL_SYSTEM_SUFFIX = """\
 You can control the smart home through the provided tools. The devices you may
@@ -40,6 +44,10 @@ class ToolLoopError(Exception):
 
 def _tool_to_openai(tool: llm.Tool, custom_serializer: Any) -> dict[str, Any]:
     """Format one Assist tool as an OpenAI function tool."""
+    if convert is None:
+        raise ToolLoopError(
+            "voluptuous_openapi is not available in this Home Assistant build"
+        )
     return {
         "type": "function",
         "function": {
