@@ -138,6 +138,28 @@ class LLMBackend(ABC):
         self._api_key = api_key
         self._answer_timeout = answer_timeout
 
+    # Read-only views for the tool loop, which dials the same endpoint with
+    # an OpenAI tools payload. Not the provider-specific internals.
+    @property
+    def session(self) -> aiohttp.ClientSession:
+        return self._session
+
+    @property
+    def base_url(self) -> str:
+        return self._base_url
+
+    @property
+    def model(self) -> str:
+        return self._model
+
+    @property
+    def api_key(self) -> str | None:
+        return self._api_key
+
+    @property
+    def answer_timeout(self) -> float:
+        return self._answer_timeout
+
     @abstractmethod
     async def _chat(
         self,

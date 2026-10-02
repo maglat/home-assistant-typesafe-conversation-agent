@@ -41,6 +41,7 @@ from .const import (
     CONF_LLM_API_KEY,
     CONF_LLM_BACKEND,
     CONF_LLM_BASE_URL,
+    CONF_LLM_CONTROL_DEVICES,
     CONF_LLM_MODEL,
     CONF_LLM_TIMEOUT,
     CONF_MODEL,
@@ -300,6 +301,10 @@ class TypeSafeSubentryFlowHandler(ConfigSubentryFlow):
                 ): TextSelector(
                     TextSelectorConfig(type=TextSelectorType.TEXT, multiline=True)
                 ),
+                vol.Optional(
+                    CONF_LLM_CONTROL_DEVICES,
+                    default=current.get(CONF_LLM_CONTROL_DEVICES, False),
+                ): BooleanSelector(),
                 vol.Optional(
                     CONF_BYPASS_LOCAL_INTENTS,
                     default=current.get(CONF_BYPASS_LOCAL_INTENTS, False),

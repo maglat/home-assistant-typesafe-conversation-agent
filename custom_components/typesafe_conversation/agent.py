@@ -44,6 +44,7 @@ from .system_one import (
     DecisionRequestError,
     DecisionResponse,
 )
+from .tool_loop import ToolLoopError, run_tool_loop
 
 
 @dataclass(slots=True)
@@ -53,6 +54,14 @@ class AgentSettings:
     inline_entity_descriptions: bool = False
     always_confirm_risky: bool = DEFAULT_ALWAYS_CONFIRM_RISKY
     bypass_local_intents: bool = False
+    llm_control_devices: bool = False
+    """Let the prose LLM call Home Assistant tools for the exposed devices.
+
+    Off by default: the decision model is the control plane, and the prose
+    path is read-only unless the user opts in. When on, the fallback path can
+    act through the Assist API - restricted to the entities exposed to
+    Assist, executed under the requesting user's context.
+    """
     system_prompt: str = ""
     """Extra instructions for the freeform answers, verbatim from the user.
 
@@ -497,6 +506,15 @@ class TypeSafeAgent:
             except LLMBackendError as err:
                 LOGGER.debug("Context resolution unavailable: %s", err)
 
+            if self.settings.llm_control_devices:
+                # Full Assist API: the LLM may call tools for the exposed
+                # devices. Tried before the read-only prose answer; a failure
+                # here only costs latency, never the answer.
+                try:
+                    return await self._answer_with_tools(user_input, chat_log)
+                except LLMBackendError as err:
+                    LOGGER.warning("LLM tool path failed: %s", err)
+
             try:
                 return await self._answer_freeform(user_input, chat_log)
             except LLMBackendError as err:
@@ -598,6 +616,39 @@ class TypeSafeAgent:
                 "Sorry, I can't answer that right now.",
             )
         return self._speech(user_input, answer or "I'm not sure.")
+
+    async def _answer_with_tools(
+        self,
+        user_input: conversation.ConversationInput,
+        chat_log: conversation.ChatLog,
+    ) -> intent.IntentResponse:
+        """Answer through the Assist API: the LLM may call HA tools.
+
+        Used as the first prose attempt when device control for the LLM is
+        enabled. Any failure falls back to the read-only prose answer, so a
+        broken tool path can only cost latency, never the answer itself.
+        """
+        if self.llm is None:
+            raise LLMBackendError("no LLM configured")
+        try:
+            answer = await run_tool_loop(
+                self.hass,
+                self.llm.session,
+                base_url=self.llm.base_url,
+                model=self.llm.model,
+                api_key=self.llm.api_key,
+                referer=getattr(self.llm, "referer", None),
+                title=getattr(self.llm, "title", None),
+                answer_timeout=self.llm.answer_timeout,
+                user_input=user_input,
+                chat_log=chat_log,
+                user_text=user_input.text,
+                extra_system_prompt=self.settings.system_prompt or None,
+            )
+        except ToolLoopError as err:
+            LOGGER.warning("Tool loop failed, falling back to prose: %s", err)
+            raise LLMBackendError(str(err)) from err
+        return self._speech(user_input, answer or "Done.")
 
     # -- small helpers --------------------------------------------------------
 

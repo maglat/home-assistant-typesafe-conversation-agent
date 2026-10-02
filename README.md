@@ -202,6 +202,7 @@ Set when you add the integration, and changeable afterwards under
 | `bypass_local_intents` | off | Send every command here, including ones Home Assistant's own sentence matcher recognises. Off is recommended; see [below](#leave-prefer-handling-commands-locally-on). |
 | `inline_entity_descriptions` | off | Describe every entity inside each question rather than once in the shared state. Roughly doubles the tokens. Only worth it if the agent picks the wrong device. |
 | `llm_backend` | none | `ollama`, an OpenAI-compatible endpoint, or unset. Used only for compound requests and general questions. |
+| `llm_control_devices` | off | Give the language model Assist tools so it can act on exposed devices when the decision model is unsure. |
 | `llm_base_url` | `http://localhost:11434` (Ollama) | Where that backend lives. Point it at your own machine to keep the prose path local. |
 | `llm_model` | — | Model name on that backend. |
 | `llm_api_key` | — | If the backend needs one. Redacted in diagnostics. |
@@ -237,6 +238,20 @@ Each conversation agent takes an optional **system prompt** (per-subentry
 option): extra instructions for the general-knowledge answers — a persona, a
 language rule, how brief to be. It is appended *after* the built-in
 guardrails, so it cannot make the assistant claim to have controlled a device.
+
+### Let the language model control devices
+
+Off by default, the prose path is read-only: it can answer in text but never
+act. With **Let the language model control devices** enabled, the fallback
+path gains Home Assistant's Assist tools — one tool per intent, restricted to
+the entities exposed to Assist, executed under the requesting user's context.
+That is the same permission model as Home Assistant's own OpenAI/Ollama
+agents: the LLM can chain tool calls ("turn off the kitchen and then set the
+thermostat to 20") for requests the decision model could not place.
+
+The decision model stays the fast path; the tool loop only runs when the
+decision model was not confident enough, and a failed tool call falls back to
+the read-only prose answer.
 
 ## Debugging
 

@@ -53,6 +53,7 @@ CONF_LLM_MODEL: Final = "llm_model"
 CONF_LLM_API_KEY: Final = "llm_api_key"
 CONF_LLM_REFERER: Final = "llm_referer"
 CONF_LLM_TITLE: Final = "llm_title"
+CONF_LLM_CONTROL_DEVICES: Final = "llm_control_devices"
 CONF_BYPASS_LOCAL_INTENTS: Final = "bypass_local_intents"
 CONF_SYSTEM_PROMPT: Final = "system_prompt"
 CONF_INLINE_ENTITY_DESCRIPTIONS: Final = "inline_entity_descriptions"
@@ -104,6 +105,13 @@ ANSWER_TEMPERATURE: Final = 0.3
 MAX_SUB_COMMANDS: Final = 6
 OLLAMA_KEEP_ALIVE: Final = "30m"
 WARMUP_INTERVAL_SECONDS: Final = 20 * 60
+MAX_TOOL_ROUNDS: Final = 8
+"""How many tool-call rounds the freeform LLM may chain.
+
+One round is one model response; a round that calls tools feeds the results
+back and asks again. Eight is generous - Home Assistant's own agents cap at
+ten - and the cap is what stops a confused model from looping forever.
+"""
 
 PROMPT_LOG_CHARS: Final = 200
 """How much of a system prompt to write to the debug log.

@@ -61,13 +61,15 @@
             "always_confirm_risky": "Always confirm before unlocking or opening",
             "inline_entity_descriptions": "Describe every entity inside the question",
             "bypass_local_intents": "Handle every command, including ones Home Assistant recognises",
-            "system_prompt": "System prompt (optional)"
+            "system_prompt": "System prompt (optional)",
+            "llm_control_devices": "Let the language model control devices"
           },
           "data_description": {
             "always_confirm_risky": "Ask first before unlocking a door, opening a garage or disarming an alarm, however sure the model is. Turning this off lets confident requests through silently.",
             "inline_entity_descriptions": "Costs roughly twice the tokens. Only worth turning on if the agent picks the wrong device.",
             "bypass_local_intents": "By default Home Assistant's own sentence matcher keeps the phrasings it recognises, and only sends the rest here. Turn this on to send everything here instead.",
-            "system_prompt": "Extra instructions for general-knowledge answers - a persona, a language rule, how brief to be. Appended after the built-in safety rules, so it cannot make the assistant claim to have controlled a device. Only used when a language model is configured."
+            "system_prompt": "Extra instructions for general-knowledge answers - a persona, a language rule, how brief to be. Appended after the built-in safety rules, so it cannot make the assistant claim to have controlled a device. Only used when a language model is configured.",
+            "llm_control_devices": "When the decision model is unsure, the language model may act on the devices exposed to Assist through Home Assistant's tool API - same permissions as the built-in LLM agents. Off by default; without it the language model can only answer in text."
           }
         }
       }
