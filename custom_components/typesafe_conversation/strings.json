@@ -51,7 +51,7 @@
           "model": "Model"
         },
         "data_description": {
-          "decision_base_url": "Root of the endpoint, without /v1 - for example http://homeassistant.local:8000 or http://192.168.1.50:11434. /v1/chat/completions is appended automatically.",
+          "decision_base_url": "Root of the endpoint, without /v1 - the /v1/chat/completions path is appended automatically.",
           "decision_api_key": "Only if the endpoint needs one. Local servers usually do not.",
           "decision_timeout": "Seconds to wait for one decision. Self-hosted models on modest hardware need more than the hosted API.",
           "model": "Model name as the endpoint reports it - for example clef-flash, von or qwen3.5-9b."
