@@ -855,7 +855,16 @@ def _describe(answer: ChoiceAnswer | None) -> dict[str, Any] | None:
 
 
 def should_try_llm_answer(response: SystemOneResponse) -> bool:
-    """Whether a freeform LLM answer is worth trying as a fallback."""
+    """Whether a freeform LLM answer is worth trying as a fallback.
+
+    The fallback ladder consults this when the decision model scored the
+    utterance as a command it could not route. "Turn the light off" that
+    lost its target mid-sentence is still a command; sending it to the
+    prose model would produce an apology dressed as an answer. The
+    probabilities say which it was: when the category distribution barely
+    moved, the utterance was noise or a fragment, and the honest answer is
+    the apology - not a hallucinated prose reply.
+    """
     category = response.choice(Q.Q_CATEGORY)
     if category is None:
         return False

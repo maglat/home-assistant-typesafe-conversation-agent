@@ -92,6 +92,14 @@ DEFAULT_LLM_TITLE: Final = "HA TypeSafe Conversation"
 
 # --- LLM behaviour -----------------------------------------------------------
 SPLIT_TIMEOUT: Final = 4.0
+"""Floor for the small utility prompts (split, rewrite).
+
+The actual budget is max(SPLIT_TIMEOUT, answer_timeout / 3): a user who
+raised the answer timeout for a busy shared server raised this one
+implicitly. The old hardcoded 4s assumed a dedicated server; behind a
+queue - one GPU serving several clients - even a 300-token request can
+wait longer than that.
+"""
 ANSWER_TIMEOUT: Final = 30.0
 """Seconds to wait for a freeform answer.
 

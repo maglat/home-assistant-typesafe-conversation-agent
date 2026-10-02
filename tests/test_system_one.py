@@ -359,15 +359,8 @@ async def test_timeout_is_not_retried(openai_client, mocker):
 
 
 async def test_openai_validate_rejects_a_systemone_endpoint(mocker):
-    """Kev answers /v1/models with a System One payload; validation must
-    reject the config instead of letting every utterance 404 later."""
-    import pytest
-
-    from custom_components.typesafe_conversation.system_one import (
-        DecisionRequestError,
-        OpenAIDecisionClient,
-    )
-
+    """A System One endpoint behind the OpenAI backend is auto-detected and
+    transparently served by the System One client instead of rejected."""
     mocker.get(
         "http://127.0.0.1:8000/v1/models",
         json={"models": [{"name": "kev-latest", "device": "cuda"}]},
@@ -378,5 +371,43 @@ async def test_openai_validate_rejects_a_systemone_endpoint(mocker):
         "kev-latest",
         timeout=5.0,
     )
-    with pytest.raises(DecisionRequestError):
-        await client.async_validate()
+    models = await client.async_validate()
+    assert models == ["kev-latest"]
+    assert client._system_one is not None
+    assert isinstance(client._system_one, TypeSafeDecisionClient)
+
+
+async def test_openai_backend_delegates_asks_to_the_detected_systemone(mocker):
+    """After detection, asks ride the System One wire protocol."""
+    mocker.get(
+        "http://127.0.0.1:8000/v1/models",
+        json={"models": [{"name": "kev-latest", "device": "cuda"}]},
+    )
+    mocker.post(
+        "http://127.0.0.1:8000/v1/systemone",
+        json={
+            "model": "kev-latest",
+            "answers": {
+                "category": {
+                    "type": "choice",
+                    "choice": "command",
+                    "probabilities": {"command": 0.9, "query": 0.1},
+                    "confidence": 0.8,
+                }
+            },
+            "usage": {"input_tokens": 100, "output_tokens": 10},
+        },
+    )
+    client = OpenAIDecisionClient(
+        mocker.create_session(asyncio.get_running_loop()),
+        "http://127.0.0.1:8000",
+        "kev-latest",
+        timeout=5.0,
+    )
+    await client.async_validate()
+    response = await client.async_ask({}, QUESTIONS)
+    answer = response.choice("category")
+    assert answer is not None
+    assert answer.choice == "command"
+    # The chat-completions endpoint was never called.
+    assert not any("chat/completions" in str(call) for call in mocker.mock_calls)

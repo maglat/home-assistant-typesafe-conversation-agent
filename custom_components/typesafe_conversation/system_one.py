@@ -315,9 +315,11 @@ class TypeSafeDecisionClient(DecisionClient):
         api_key: str | None,
         model: str,
         base_url: str = TYPESAFE_API_URL,
+        timeout: float = API_TIMEOUT,
     ) -> None:
         super().__init__(session, model)
         self._api_key = api_key
+        self._timeout = timeout
         root = base_url.rstrip("/")
         # Accept a root ("http://host:8010"), a versioned root
         # ("http://host:8010/v1") or a full systemone URL.
@@ -347,7 +349,7 @@ class TypeSafeDecisionClient(DecisionClient):
             async with self._session.get(
                 self._models_url,
                 headers=self._headers(),
-                timeout=aiohttp.ClientTimeout(total=API_TIMEOUT),
+                timeout=aiohttp.ClientTimeout(total=self._timeout),
             ) as response:
                 if response.status in (401, 403):
                     raise DecisionAuthError("The endpoint rejected the API key")
@@ -371,7 +373,7 @@ class TypeSafeDecisionClient(DecisionClient):
                 self._systemone_url,
                 json=body,
                 headers=self._headers(),
-                timeout=aiohttp.ClientTimeout(total=API_TIMEOUT),
+                timeout=aiohttp.ClientTimeout(total=self._timeout),
             ) as response:
                 if response.status in (401, 403):
                     raise DecisionAuthError("Invalid TypeSafe API key")
@@ -597,6 +599,9 @@ class OpenAIDecisionClient(DecisionClient):
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
         self._timeout = timeout
+        self._system_one: TypeSafeDecisionClient | None = None
+        """Set when validation discovers a System One endpoint behind this
+        URL; every ask then delegates to it."""
 
     async def async_validate(self) -> list[str]:
         """Check the endpoint is reachable and the model is served there."""
@@ -618,14 +623,25 @@ class OpenAIDecisionClient(DecisionClient):
             raise DecisionUnavailableError("Timed out reaching the endpoint") from err
         if "data" not in payload and "models" in payload:
             # A System One /v1/models reply (Kev, Clef, hosted Jev): the
-            # endpoint is alive but speaks the wrong protocol for this
-            # backend. Fail loudly instead of 404-ing on every utterance.
-            raise DecisionRequestError(
-                f"{_models_url(self._base_url)} answered like a Jev/Kev "
-                "System One endpoint, not an OpenAI-compatible one. "
-                "Configure the 'TypeSafe hosted' backend with this base URL "
-                "instead."
+            # endpoint is alive and speaks the System One protocol. That is
+            # not a misconfiguration to reject - it is exactly what a Kev
+            # server is - so switch to the backend that speaks it and let
+            # every later ask ride the same decision. Users pick
+            # "OpenAI-compatible" because that is what their server's page
+            # calls it; the wire protocol underneath is ours to get right.
+            LOGGER.warning(
+                "%s answered like a Jev/Kev System One endpoint; "
+                "routing decisions through the System One protocol",
+                _models_url(self._base_url),
             )
+            self._system_one = TypeSafeDecisionClient(
+                self._session,
+                self._api_key,
+                self._model,
+                self._base_url,
+                self._timeout,
+            )
+            return await self._system_one.async_validate()
         models = [
             m.get("id", "")
             for m in payload.get("data", [])
@@ -642,6 +658,10 @@ class OpenAIDecisionClient(DecisionClient):
     async def _ask_once(
         self, state: Any, questions: dict[str, dict[str, Any]]
     ) -> DecisionResponse:
+        if self._system_one is not None:
+            # Validation found a Jev/Kev System One endpoint behind this URL;
+            # the same wire protocol serves every ask from here on.
+            return await self._system_one._ask_once(state, questions)
         prompt = _build_decision_prompt(state, questions)
         payload = {
             "model": self._model,

@@ -36,7 +36,7 @@ from .executor import (
     describe_action,
 )
 from .extraction import extract
-from .llm_backend import LLMBackend, LLMBackendError
+from .llm_backend import LLMBackend, LLMBackendError, LLMBackendTimeoutError
 from .router import Plan, Route, route, should_try_llm_answer
 from .system_one import (
     DecisionClient,
@@ -494,17 +494,36 @@ class TypeSafeAgent:
             LOGGER.debug("Fallback: handled locally by the sentence matcher")
             return local
 
-        if self.llm is not None and (
+        llm_attempted = self.llm is not None and (
             response is None or should_try_llm_answer(response)
-        ):
+        )
+        if llm_attempted:
             # The utterance may only be unclear *in isolation*. A follow-up
             # like "and back off again" resolves once the previous turns are
             # in view - so let the LLM rewrite it into a standalone command
-            # and run the decision model once more on the result.
+            # and run the decision model once more on the result. The
+            # rewrite runs even when the category distribution leaned
+            # "command": a fragment like "und wieder an" scores as a command
+            # with no usable target, and the rewrite is what recovers it.
             try:
                 return await self._resolve_context(user_input, chat_log)
             except LLMBackendError as err:
                 LOGGER.debug("Context resolution unavailable: %s", err)
+                if isinstance(err, LLMBackendTimeoutError):
+                    # The server just proved it cannot serve even a small
+                    # prompt inside the budget. The prose answer sends a much
+                    # larger prompt with a much larger budget - the outcome
+                    # is already decided, so skip straight to the apology
+                    # instead of making the user wait through another
+                    # timeout first.
+                    LOGGER.debug(
+                        "Skipping the prose answer after the rewrite timed out"
+                    )
+                    return self._error(
+                        user_input,
+                        intent.IntentResponseErrorCode.NO_INTENT_MATCH,
+                        "Sorry, I'm not sure what you'd like me to do.",
+                    )
 
             if self.settings.llm_control_devices:
                 # Full Assist API: the LLM may call tools for the exposed
@@ -553,6 +572,12 @@ class TypeSafeAgent:
             # Nothing to resolve: the utterance was already standalone, so a
             # second decision pass would only repeat the same fallback.
             raise LLMBackendError("rewrite did not change the utterance")
+        if rewritten.casefold() in ("none", "none.", '"none"'):
+            # The model read the utterance in context and decided it was not
+            # a command at all - a question, a new topic. Re-running the
+            # decision model on the literal word "NONE" would only score it
+            # unclear again; the prose answer is the correct next rung.
+            raise LLMBackendError("rewrite judged the utterance not a command")
 
         LOGGER.debug("Context resolution: %r -> %r", user_input.text, rewritten)
         try:

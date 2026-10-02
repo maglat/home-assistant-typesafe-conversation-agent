@@ -105,6 +105,16 @@ class LLMBackendError(Exception):
     """Any failure talking to the configured LLM."""
 
 
+class LLMBackendTimeoutError(LLMBackendError):
+    """The endpoint missed its timeout.
+
+    Distinguished from other failures so the fallback ladder can tell
+    "server busy" from "server broken": a busy server will miss the next,
+    bigger prompt's budget too, so stacking a second timeout only adds
+    dead air before the same apology.
+    """
+
+
 CONTEXT_SYSTEM_PROMPT = """\
 You resolve follow-up requests in a smart-home voice conversation.
 
@@ -174,6 +184,18 @@ class LLMBackend(ABC):
     def answer_timeout(self) -> float:
         return self._answer_timeout
 
+    @property
+    def _fast_timeout(self) -> float:
+        """Budget for the small utility prompts (split, rewrite).
+
+        A slice of the answer timeout rather than a fixed constant, so a
+        user who raised the answer timeout for a busy shared server raised
+        this one implicitly. The old hardcoded 4s assumed a dedicated
+        server; behind a queue - one GPU serving several clients - even a
+        300-token request can wait longer than that.
+        """
+        return max(SPLIT_TIMEOUT, self._answer_timeout / 3.0)
+
     @abstractmethod
     async def _chat(
         self,
@@ -216,7 +238,7 @@ class LLMBackend(ABC):
                 messages,
                 max_tokens=SPLIT_MAX_TOKENS,
                 temperature=0.0,
-                timeout=SPLIT_TIMEOUT,
+                timeout=self._fast_timeout,
             )
         except LLMBackendError as err:
             LOGGER.warning("Could not split a compound request (%s)", err)
@@ -306,7 +328,7 @@ class LLMBackend(ABC):
             messages,
             max_tokens=SPLIT_MAX_TOKENS,
             temperature=0.0,
-            timeout=SPLIT_TIMEOUT,
+            timeout=self._fast_timeout,
         )
         _log_exchange("rewrite", self.name, self._model, messages, raw, metrics)
         return raw.strip()
@@ -569,7 +591,7 @@ async def _post_json(
     except LLMBackendError:
         raise
     except TimeoutError as err:
-        raise LLMBackendError(f"Timed out after {timeout}s") from err
+        raise LLMBackendTimeoutError(f"Timed out after {timeout}s") from err
     except aiohttp.ClientError as err:
         raise LLMBackendError(str(err)) from err
     except json.JSONDecodeError as err:
@@ -652,6 +674,7 @@ def create_backend(
 __all__ = [
     "LLMBackend",
     "LLMBackendError",
+    "LLMBackendTimeoutError",
     "OllamaBackend",
     "OpenAICompatBackend",
     "create_backend",

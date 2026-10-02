@@ -57,6 +57,16 @@ async def test_rewrite_returns_the_standalone_command(ollama, mocker):
     assert 'newest utterance: "and back off again"' in user_content
 
 
+async def test_fast_timeout_never_below_the_floor(ollama):
+    """max(SPLIT_TIMEOUT, answer/3): the share wins when the answer timeout
+    is large, the floor when it is small."""
+    assert ollama._fast_timeout == 10.0  # 30s answer / 3, above the 4s floor
+    backend = OpenAICompatBackend(ollama._session, "http://x", "m", answer_timeout=90.0)
+    assert backend._fast_timeout == 30.0  # 90/3 = 30
+    tight = OpenAICompatBackend(ollama._session, "http://x", "m", answer_timeout=6.0)
+    assert tight._fast_timeout == 4.0  # the floor wins below 12s
+
+
 async def test_rewrite_passes_none_through_untouched(ollama, mocker):
     """The agent treats NONE as 'nothing to resolve' and falls through."""
     mocker.post("http://127.0.0.1:11434/api/chat", json=_chat("NONE"))
