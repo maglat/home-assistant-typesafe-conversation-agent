@@ -86,7 +86,7 @@ DEFAULT_OPENAI_COMPAT_URL: Final = "https://openrouter.ai/api"
 BACKEND_OLLAMA: Final = "ollama"
 BACKEND_OPENAI_COMPAT: Final = "openai_compatible"
 DEFAULT_LLM_REFERER: Final = (
-    "https://github.com/the-sof/home-assistant-typesafe-conversation-agent"
+    "https://github.com/maglat/home-assistant-typesafe-conversation-agent"
 )
 DEFAULT_LLM_TITLE: Final = "HA TypeSafe Conversation"
 

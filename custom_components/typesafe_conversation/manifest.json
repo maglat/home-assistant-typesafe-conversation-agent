@@ -5,7 +5,7 @@
     "assist_pipeline"
   ],
   "codeowners": [
-    "@the-sof"
+    "@maglat"
   ],
   "config_flow": true,
   "dependencies": [
@@ -13,10 +13,10 @@
     "homeassistant",
     "intent"
   ],
-  "documentation": "https://github.com/the-sof/home-assistant-typesafe-conversation-agent",
+  "documentation": "https://github.com/maglat/home-assistant-typesafe-conversation-agent",
   "integration_type": "service",
   "iot_class": "cloud_polling",
-  "issue_tracker": "https://github.com/the-sof/home-assistant-typesafe-conversation-agent/issues",
+  "issue_tracker": "https://github.com/maglat/home-assistant-typesafe-conversation-agent/issues",
   "requirements": [
     "voluptuous-openapi>=0.4.0"
   ],

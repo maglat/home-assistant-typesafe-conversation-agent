@@ -5,7 +5,7 @@
 **Please do not open a public issue for a security problem.**
 
 Use GitHub's private vulnerability reporting instead: go to the
-[Security tab](https://github.com/the-sof/home-assistant-typesafe-conversation-agent/security)
+[Security tab](https://github.com/maglat/home-assistant-typesafe-conversation-agent/security)
 and click **Report a vulnerability**. That opens a private thread visible only
 to the maintainer.
 

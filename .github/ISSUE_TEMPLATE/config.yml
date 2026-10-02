@@ -1,7 +1,7 @@
 blank_issues_enabled: false
 contact_links:
   - name: Security vulnerability
-    url: https://github.com/the-sof/home-assistant-typesafe-conversation-agent/security/advisories/new
+    url: https://github.com/maglat/home-assistant-typesafe-conversation-agent/security/advisories/new
     about: Report privately. Please do not open a public issue for a security problem.
   - name: TypeSafe API question
     url: https://docs.typesafe.ai
