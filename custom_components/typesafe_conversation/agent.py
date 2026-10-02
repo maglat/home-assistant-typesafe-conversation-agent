@@ -357,7 +357,9 @@ class TypeSafeAgent:
             # a command that worked from one that hung. name_target_in_speech
             # only decides how specific to be - in the middle confidence band
             # we name the target so a wrong guess can be corrected at once.
-            response.async_set_speech(describe_action(plan, response))
+            response.async_set_speech(
+                describe_action(plan, response, user_input.language)
+            )
         return response
 
     async def _handle_compound(
@@ -494,17 +496,15 @@ class TypeSafeAgent:
             LOGGER.debug("Fallback: handled locally by the sentence matcher")
             return local
 
-        llm_attempted = self.llm is not None and (
-            response is None or should_try_llm_answer(response)
-        )
-        if llm_attempted:
+        if self.llm is not None:
             # The utterance may only be unclear *in isolation*. A follow-up
             # like "and back off again" resolves once the previous turns are
             # in view - so let the LLM rewrite it into a standalone command
-            # and run the decision model once more on the result. The
-            # rewrite runs even when the category distribution leaned
-            # "command": a fragment like "und wieder an" scores as a command
-            # with no usable target, and the rewrite is what recovers it.
+            # and run the decision model once more on the result. This runs
+            # whenever there is history, regardless of the category lean:
+            # "und wieder an" scores unclear with no usable target, and only
+            # the history knows what it meant. Without history the rewrite
+            # raises before spending anything.
             try:
                 return await self._resolve_context(user_input, chat_log)
             except LLMBackendError as err:
@@ -525,6 +525,9 @@ class TypeSafeAgent:
                         "Sorry, I'm not sure what you'd like me to do.",
                     )
 
+        if self.llm is not None and (
+            response is None or should_try_llm_answer(response)
+        ):
             if self.settings.llm_control_devices:
                 # Full Assist API: the LLM may call tools for the exposed
                 # devices. Tried before the read-only prose answer; a failure

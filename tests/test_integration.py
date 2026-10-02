@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from http import HTTPStatus
 from unittest.mock import patch
 
 import pytest
@@ -490,3 +491,82 @@ async def test_a_command_that_reached_no_entity_is_reported_as_failed(
     assert result.response.error_code is intent.IntentResponseErrorCode.FAILED_TO_HANDLE
     spoken = result.response.speech.get("plain", {}).get("speech", "")
     assert "Coffee Maker" in spoken
+
+
+async def test_a_follow_up_survives_a_command_leaning_category(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker
+):
+    """The regression behind "und wieder an" -> "Sorry, I'm not sure".
+
+    A follow-up that only makes sense with the previous turn in view scores
+    unclear with most of its probability mass on command - and the fallback
+    gate used to demand an information/query lean before letting the context
+    rewrite run. The rewrite is the only thing that can resolve the
+    utterance, so it must run whenever there is history, not only when the
+    category distribution leaned towards prose.
+    """
+    await _setup_home(hass)
+    # The rewrite endpoint must exist before the entry loads: the LLM
+    # warm-up fires at setup and would hit an unmocked URL otherwise.
+    aioclient_mock.post(
+        "http://rewrite.local/api/chat",
+        json={"message": {"role": "assistant", "content": "turn on the coffee maker"}},
+    )
+    await _add_entry(
+        hass,
+        aioclient_mock,
+        llm_backend="ollama",
+        llm_base_url="http://rewrite.local",
+        llm_model="test",
+    )
+
+    # Turn 1: a command that works, so the chat log carries history.
+    aioclient_mock.post(TYPESAFE_API_URL, json=_recorded("get_the_coffee_boiling"))
+    calls = async_mock_service(hass, "switch", "turn_on")
+    first = await conversation.async_converse(
+        hass,
+        "get the coffee boiling",
+        None,
+        None,
+        agent_id="conversation.typesafe_conversation",
+    )
+    assert first.response.response_type is not intent.IntentResponseType.ERROR
+    assert len(calls) == 1
+
+    # Turn 2: the follow-up. The decision model sees the history and scores
+    # it unclear - no usable target. The rewrite turns it into a standalone
+    # command, and the second decision pass routes it.
+    aioclient_mock.clear_requests()
+    aioclient_mock.post(
+        "http://rewrite.local/api/chat",
+        json={"message": {"role": "assistant", "content": "turn on the coffee maker"}},
+    )
+
+    decisions: dict[str, int] = {"n": 0}
+
+    async def _decide(method, url, data):
+        from pytest_homeassistant_custom_component.test_util.aiohttp import (
+            AiohttpClientMockResponse,
+        )
+
+        decisions["n"] += 1
+        payload = (
+            _recorded("asdfgh")
+            if decisions["n"] == 1
+            else _recorded("get_the_coffee_boiling")
+        )
+        return AiohttpClientMockResponse(
+            method, url, status=HTTPStatus.OK, json=payload
+        )
+
+    aioclient_mock.post(TYPESAFE_API_URL, side_effect=_decide)
+    second = await conversation.async_converse(
+        hass,
+        "and back on again",
+        first.conversation_id,
+        None,
+        agent_id="conversation.typesafe_conversation",
+    )
+
+    assert len(calls) == 2, "the rewrite must resolve the follow-up into a real command"
+    assert second.response.response_type is not intent.IntentResponseType.ERROR

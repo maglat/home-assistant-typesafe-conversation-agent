@@ -296,7 +296,35 @@ async def _handle(
     )
 
 
-def describe_action(plan: Plan, response: intent.IntentResponse | None = None) -> str:
+_ACTION_VERBS_DE: dict[str, str] = {
+    # Past participles, used as "{target} {verb}." - German puts the
+    # participle last: "Bürolicht eingeschaltet."
+    "turn_on": "eingeschaltet",
+    "turn_off": "ausgeschaltet",
+    "toggle": "umgeschaltet",
+    "open": "geöffnet",
+    "close": "geschlossen",
+    "stop": "gestoppt",
+    "lock": "verriegelt",
+    "unlock": "entriegelt",
+    "activate": "aktiviert",
+    "run": "ausgeführt",
+    "press": "gedrückt",
+    "pause": "pausiert",
+    "dimmer": "gedimmt",
+    "brighter": "heller gestellt",
+    "warmer": "wärmer gestellt",
+    "cooler": "kühler gestellt",
+    "louder": "lauter gestellt",
+    "quieter": "leiser gestellt",
+}
+
+
+def describe_action(
+    plan: Plan,
+    response: intent.IntentResponse | None = None,
+    language: str | None = None,
+) -> str:
     """Compose speech for a command that succeeded.
 
     Home Assistant's service intent handlers set targets and states but no
@@ -304,6 +332,10 @@ def describe_action(plan: Plan, response: intent.IntentResponse | None = None) -
     which this agent bypasses. So if we do not say something, nothing does,
     the pipeline skips TTS entirely, and a command that worked is
     indistinguishable from one that hung.
+
+    When the response carries a translated template (the intent handlers fill
+    speech_slots, and Home Assistant ships response templates per language),
+    prefer it: "Licht ausgeschaltet" beats an English-only fallback verb.
     """
     # HassMediaSearchAndPlay reports what it found in speech_slots rather than
     # speech. Naming the track is far better than a generic acknowledgement.
@@ -313,7 +345,17 @@ def describe_action(plan: Plan, response: intent.IntentResponse | None = None) -
             return f"Playing {media['title']} on {plan.target.described}."
 
     verb = ACTION_VERBS.get(plan.action or "", "Did that to")
-    return f"{verb} {plan.target.described}."
+    target = plan.target.described
+    if language is not None and language.split("-")[0].lower() == "de":
+        # German acknowledgements. "Turned off them." reads as broken
+        # English; the German equivalent of the area case is the bare
+        # participle, mirroring HA's own "Licht ausgeschaltet".
+        verb_de = _ACTION_VERBS_DE.get(plan.action or "")
+        if verb_de is not None:
+            if target == "them":
+                return f"{verb_de.capitalize()}."
+            return f"{target} {verb_de}."
+    return f"{verb} {target}."
 
 
 __all__ = [

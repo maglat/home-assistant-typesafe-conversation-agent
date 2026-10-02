@@ -19,7 +19,10 @@ from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import async_mock_service
 
 from custom_components.typesafe_conversation.actions import spec_for
-from custom_components.typesafe_conversation.entities import EntityCatalog
+from custom_components.typesafe_conversation.entities import (
+    CatalogEntity,
+    EntityCatalog,
+)
 from custom_components.typesafe_conversation.executor import async_execute, build_slots
 from custom_components.typesafe_conversation.router import Plan, Route, Target
 
@@ -411,3 +414,45 @@ async def test_a_query_against_an_unavailable_entity_still_runs(
     )
     response = await async_execute_query(hass, plan, _input(hass))
     assert response.response_type is not intent.IntentResponseType.ERROR
+
+
+async def test_describe_action_speaks_german():
+    """German acknowledgements instead of "Turned off them."
+
+    The user's UI is German; the hardcoded English verbs read as broken
+    English ("Turned off them."). The German branch uses HA's own shape -
+    participle last, bare participle for the area case, mirroring
+    "Licht ausgeschaltet".
+    """
+    from custom_components.typesafe_conversation.executor import describe_action
+
+    plan = Plan(
+        Route.COMMAND,
+        domain="light",
+        action="turn_off",
+        target=Target(area_id="office"),
+    )
+    assert describe_action(plan, language="de") == "Ausgeschaltet."
+    assert describe_action(plan, language="de-DE") == "Ausgeschaltet."
+
+    entity_plan = Plan(
+        Route.COMMAND,
+        domain="light",
+        action="turn_off",
+        target=Target(
+            entity=CatalogEntity(
+                entity_id="light.desk",
+                name="Schreibtisch",
+                aliases=(),
+                area_id="office",
+                area_name="Büro",
+                floor_name=None,
+                domain="light",
+                device_class=None,
+                supported_features=0,
+            )
+        ),
+    )
+    assert describe_action(entity_plan, language="de") == "Schreibtisch ausgeschaltet."
+    # English stays untouched.
+    assert describe_action(entity_plan, language="en") == "Turned off Schreibtisch."
