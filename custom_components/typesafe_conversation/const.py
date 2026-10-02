@@ -128,7 +128,7 @@ states - and home-assistant.log is what gets pasted into issue reports."""
 # --- Catalog -----------------------------------------------------------------
 # The binding constraint is the API's 255-option cap on a Choice, not tokens.
 MAX_CHOICE_OPTIONS: Final = 250
-MAX_HISTORY_TURNS: Final = 2
+MAX_HISTORY_TURNS: Final = 6
 CATALOG_SUMMARY_MAX_ENTITIES: Final = 120
 TRACE_HISTORY: Final = 20
 """How many recent request traces to keep for the diagnostics download."""
