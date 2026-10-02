@@ -644,6 +644,17 @@ class OpenAIDecisionClient(DecisionClient):
             ) as response:
                 if response.status in (401, 403):
                     raise DecisionAuthError("The endpoint rejected the API key")
+                if response.status == 404:
+                    # The classic misconfiguration: a Jev/Kev System One
+                    # endpoint pointed at the OpenAI-compatible backend. The
+                    # error must say which knob to turn, not just 404.
+                    raise DecisionRequestError(
+                        f"{_chat_completions_url(self._base_url)} does not exist. "
+                        "This endpoint does not serve OpenAI chat completions. "
+                        "If it is a Jev/Kev System One model (Kev, Clef, hosted "
+                        "Jev), configure the 'TypeSafe hosted' backend with "
+                        "this base URL instead."
+                    )
                 if response.status in (429, 529):
                     raise _RetryableError(
                         f"The endpoint returned {response.status}",

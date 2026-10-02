@@ -130,3 +130,47 @@ def _fake_chat_log(hass, user_input):
         ).UserContent(content=user_input.text)
     )
     return log
+
+
+def test_sanitize_json_schema_stringifies_voluptuous_sentinels():
+    """The 422 from the field: _Unsupported inside tool parameters."""
+    import json
+
+    from custom_components.typesafe_conversation.tool_loop import (
+        _sanitize_json_schema,
+    )
+
+    class _Unsupported:
+        """Stand-in for the voluptuous_openapi sentinel."""
+
+    schema = {
+        "type": "object",
+        "properties": {"entity_id": {"type": "string"}, "area": _Unsupported()},
+        "required": ["entity_id", _Unsupported()],
+    }
+    cleaned = _sanitize_json_schema(schema)
+    # The whole structure must survive a strict JSON round-trip.
+    json.dumps(cleaned)
+    assert cleaned["properties"]["entity_id"] == {"type": "string"}
+    assert isinstance(cleaned["required"], list)
+
+
+def test_sanitize_json_schema_handles_primitives_and_depth():
+    from custom_components.typesafe_conversation.tool_loop import (
+        _sanitize_json_schema,
+    )
+
+    assert _sanitize_json_schema(None) is None
+    assert _sanitize_json_schema("text") == "text"
+    assert _sanitize_json_schema(3) == 3
+    assert _sanitize_json_schema(True) is True
+    assert _sanitize_json_schema(["a", 1]) == ["a", 1]
+    # Depth guard: deeply nested structures collapse to an empty dict.
+    deep = current = {}
+    for _ in range(20):
+        current["child"] = {}
+        current = current["child"]
+    # Depth guard: the deepest levels collapse, the rest survives as JSON.
+    import json as _json
+
+    _json.dumps(_sanitize_json_schema(deep))

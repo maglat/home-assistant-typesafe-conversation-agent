@@ -85,6 +85,20 @@ Home state:
 
 _FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL)
 _ARRAY_RE = re.compile(r"\[.*\]", re.DOTALL)
+_THINK_RE = re.compile(r"<think>.*?\s*", re.DOTALL)
+_UNCLOSED_THINK_RE = re.compile(r"^\s*<think>.*", re.DOTALL)
+
+
+def _strip_think(text: str) -> str:
+    """Remove reasoning-model think blocks from a reply.
+
+    GLM, Qwen-thinking and friends wrap their hidden reasoning in
+    ``<think>...``. When the token cap cuts generation short, the
+    closing tag never arrives and the whole reply is reasoning with no
+    answer - which read as "the model did something but nothing came back".
+    """
+    text = _THINK_RE.sub("", text)
+    return _UNCLOSED_THINK_RE.sub("", text)
 
 
 class LLMBackendError(Exception):
@@ -330,7 +344,7 @@ class OllamaBackend(LLMBackend):
             text = data["message"]["content"]
         except (KeyError, TypeError) as err:
             raise LLMBackendError(f"Unexpected Ollama response: {data}") from err
-        return text, _ollama_metrics(data, elapsed)
+        return _strip_think(text), _ollama_metrics(data, elapsed)
 
     async def async_warm_up(self) -> None:
         """Keep the model resident.
@@ -409,7 +423,7 @@ class OpenAICompatBackend(LLMBackend):
             text = data["choices"][0]["message"]["content"] or ""
         except (KeyError, IndexError, TypeError) as err:
             raise LLMBackendError(f"Unexpected response: {data}") from err
-        return text, _openai_metrics(data, elapsed)
+        return _strip_think(text), _openai_metrics(data, elapsed)
 
 
 # --- metrics ------------------------------------------------------------

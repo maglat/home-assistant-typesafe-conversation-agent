@@ -99,8 +99,14 @@ A large local model can take well over the old 20s, especially on the first
 call after a restart. Raise it with CONF_LLM_TIMEOUT, or point the LLM at a
 smaller model - this path is only used for prose, so it does not need to be
 the same model you would pick for reasoning."""
-SPLIT_MAX_TOKENS: Final = 200
-ANSWER_MAX_TOKENS: Final = 180
+SPLIT_MAX_TOKENS: Final = 512
+ANSWER_MAX_TOKENS: Final = 1024
+"""Token caps for the prose paths.
+
+Reasoning models (GLM, Qwen-thinking, DeepSeek-R1-style) spend their budget
+on hidden reasoning before writing the visible answer - a 180-token cap was
+consumed entirely by reasoning, returning an empty reply. The caps only bound
+runaway generation; normal answers stay far below them."""
 ANSWER_TEMPERATURE: Final = 0.3
 MAX_SUB_COMMANDS: Final = 6
 OLLAMA_KEEP_ALIVE: Final = "30m"

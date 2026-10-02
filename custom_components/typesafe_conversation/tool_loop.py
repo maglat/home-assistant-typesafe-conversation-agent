@@ -53,9 +53,36 @@ def _tool_to_openai(tool: llm.Tool, custom_serializer: Any) -> dict[str, Any]:
         "function": {
             "name": tool.name,
             "description": tool.description or "",
-            "parameters": convert(tool.parameters, custom_serializer=custom_serializer),
+            "parameters": _sanitize_json_schema(
+                convert(tool.parameters, custom_serializer=custom_serializer)
+            ),
         },
     }
+
+
+def _sanitize_json_schema(value: Any, depth: int = 0) -> Any:
+    """Coerce a converted voluptuous schema into strict JSON.
+
+    voluptuous_openapi leaves sentinel objects (``_Unsupported``) where a
+    schema feature has no JSON-Schema equivalent, and OpenAI-compatible
+    servers reject the request unless every ``parameters`` is a plain
+    dictionary. Walk the structure: keep dicts, lists and scalars, stringify
+    anything else so the surrounding structure stays valid JSON.
+    """
+    if depth > 12:
+        return {}
+    if value is None or isinstance(value, (str, bool, int, float)):
+        return value
+    if isinstance(value, dict):
+        return {
+            key: _sanitize_json_schema(item, depth + 1)
+            for key, item in value.items()
+            if isinstance(key, str)
+        }
+    if isinstance(value, (list, tuple)):
+        return [_sanitize_json_schema(item, depth + 1) for item in value]
+    # Sentinel objects, types, anything unserialisable: stringify.
+    return str(value)
 
 
 async def run_tool_loop(

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import unittest.mock
+
 import pytest
 from pytest_homeassistant_custom_component.test_util.aiohttp import (
     AiohttpClientMocker,
@@ -284,3 +286,72 @@ async def test_the_home_catalog_is_truncated_out_of_the_log(session, mocker):
     # The catalog appears at most once, inside the truncated head.
     assert logged.count(secret) <= 1
     assert len(home_state) > PROMPT_LOG_CHARS
+
+
+@pytest.mark.asyncio
+async def test_openai_reply_strips_think_blocks(session, mocker):
+    """GLM-style reasoning: content wrapped in (unclosed) think tags."""
+    from custom_components.typesafe_conversation.llm_backend import (
+        OpenAICompatBackend,
+    )
+
+    backend = OpenAICompatBackend(
+        session=None,
+        base_url="http://llm.local/v1",
+        api_key="",
+        model="mainllm",
+    )
+    payload = {"choices": [{"message": {"content": "The office light is on."}}]}
+
+    async def _post(*args, **kwargs):
+        return payload
+
+    with unittest.mock.patch(
+        "custom_components.typesafe_conversation.llm_backend._post_json", new=_post
+    ):
+        text = await backend.answer_freeform(
+            "question",
+            [],
+            home_state="",
+            local_time="12:00",
+            weekday="Monday",
+            speaker_area="office",
+        )
+    assert text == "The office light is on."
+
+
+@pytest.mark.asyncio
+async def test_openai_reply_with_unclosed_think_is_not_empty(session, mocker):
+    """Token cap cuts the reasoning short: no closing tag, no answer."""
+    from custom_components.typesafe_conversation.llm_backend import (
+        OpenAICompatBackend,
+    )
+
+    backend = OpenAICompatBackend(
+        session=None,
+        base_url="http://llm.local/v1",
+        api_key="",
+        model="mainllm",
+    )
+    payload = {
+        "choices": [
+            {"message": {"content": "Let me check the rooms... the user asked about"}}
+        ]
+    }
+
+    async def _post(*args, **kwargs):
+        return payload
+
+    with unittest.mock.patch(
+        "custom_components.typesafe_conversation.llm_backend._post_json", new=_post
+    ):
+        text = await backend.answer_freeform(
+            "question",
+            [],
+            home_state="",
+            local_time="12:00",
+            weekday="Monday",
+            speaker_area="office",
+        )
+    assert "<think>" not in text
+    assert "office" not in text
