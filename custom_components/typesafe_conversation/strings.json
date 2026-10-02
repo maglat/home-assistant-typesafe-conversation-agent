@@ -33,11 +33,13 @@
         "description": "Create an API key at {console_url}",
         "data": {
           "api_key": "TypeSafe API key",
-          "model": "Model"
+          "model": "Model",
+          "decision_base_url": "Base URL (optional)"
         },
         "data_description": {
-          "api_key": "Your TypeSafe API key.",
-          "model": "Jev is the only hosted model today; jev-latest follows releases."
+          "api_key": "Only needed for the hosted TypeSafe API.",
+          "model": "Jev is the only hosted model today; jev-latest follows releases.",
+          "decision_base_url": "Leave empty for the hosted TypeSafe API. To use a self-hosted Jev-compatible model such as Kev, enter its root - for example http://192.168.178.7:8010. /v1/systemone is appended automatically."
         }
       },
       "openai": {

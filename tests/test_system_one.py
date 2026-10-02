@@ -260,3 +260,76 @@ async def test_create_decision_client_defaults_to_typesafe():
         session=None, settings={"api_key": "sk-test", CONF_MODEL: "jev-latest"}
     )
     assert isinstance(client, TypeSafeDecisionClient)
+
+
+# --- the System One backend against a self-hosted endpoint ---------------------
+
+
+async def test_systemone_backend_accepts_a_custom_base_url(mocker):
+    """Kev on the LAN: same wire protocol, different host, no API key."""
+    session = mocker.create_session(asyncio.get_running_loop())
+    client = TypeSafeDecisionClient(
+        session, None, "kev-latest", base_url="http://192.168.178.7:8010"
+    )
+    mocker.post(
+        "http://192.168.178.7:8010/v1/systemone",
+        json={
+            "model": "kev-latest",
+            "answers": {
+                "category": {
+                    "type": "choice",
+                    "choice": "command",
+                    "probabilities": {"command": 0.9, "query": 0.1},
+                    "confidence": 0.8,
+                }
+            },
+            "usage": {"input_tokens": 100, "output_tokens": 10},
+        },
+    )
+    response = await client.async_ask({}, QUESTIONS)
+    assert response.choice("category").choice == "command"
+
+    _method, url, body, headers = mocker.mock_calls[0]
+    assert str(url) == "http://192.168.178.7:8010/v1/systemone"
+    assert body["model"] == "kev-latest"
+    assert "Authorization" not in headers, "no key, no header"
+
+
+async def test_systemone_backend_strips_a_trailing_systemone_path(mocker):
+    """Users paste the full endpoint URL; both shapes must work."""
+    session = mocker.create_session(asyncio.get_running_loop())
+    client = TypeSafeDecisionClient(
+        session,
+        None,
+        "kev-latest",
+        base_url="http://192.168.178.7:8010/v1/systemone",
+    )
+    mocker.get(
+        "http://192.168.178.7:8010/v1/models",
+        json={"models": [{"name": "kev-latest"}]},
+    )
+    assert await client.async_validate() == ["kev-latest"]
+
+
+async def test_create_decision_client_systemone_with_base_url():
+    """The factory wires a self-hosted System One endpoint from settings."""
+    client = create_decision_client(
+        session=None,
+        settings={
+            CONF_DECISION_BACKEND: "typesafe",
+            CONF_DECISION_BASE_URL: "http://192.168.178.7:8010",
+            CONF_MODEL: "kev-latest",
+        },
+    )
+    assert isinstance(client, TypeSafeDecisionClient)
+    assert client._base_url == "http://192.168.178.7:8010"
+    assert client._api_key is None
+
+
+async def test_create_decision_client_typesafe_without_key_still_builds():
+    """A self-hosted endpoint needs no key; None must not veto the client."""
+    client = create_decision_client(
+        session=None,
+        settings={CONF_DECISION_BACKEND: "typesafe", CONF_MODEL: "kev-latest"},
+    )
+    assert isinstance(client, TypeSafeDecisionClient)

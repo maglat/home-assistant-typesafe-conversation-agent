@@ -90,8 +90,9 @@ def _decision_schema(backend: str | None) -> vol.Schema:
             NumberSelectorConfig(min=2, max=120, step=1, unit_of_measurement="s")
         )
     else:
+        fields[vol.Optional(CONF_DECISION_BASE_URL)] = TextSelector()
         fields[vol.Optional(CONF_MODEL, default=DEFAULT_MODEL)] = TextSelector()
-        fields[vol.Required(CONF_API_KEY)] = TextSelector(
+        fields[vol.Optional(CONF_API_KEY)] = TextSelector(
             TextSelectorConfig(type=TextSelectorType.PASSWORD)
         )
     return vol.Schema(fields)

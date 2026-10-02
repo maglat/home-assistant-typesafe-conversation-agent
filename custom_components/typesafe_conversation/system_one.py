@@ -39,7 +39,6 @@ from .const import (
     CIRCUIT_RESET_SECONDS,
     LOGGER,
     TYPESAFE_API_URL,
-    TYPESAFE_MODELS_URL,
 )
 
 
@@ -293,27 +292,56 @@ def _parse_retry_after(value: str | None) -> float | None:
 
 
 class TypeSafeDecisionClient(DecisionClient):
-    """Talks to TypeSafe's hosted ``POST /v1/systemone``."""
+    """Talks the System One wire protocol (``POST /v1/systemone``).
+
+    Defaults to TypeSafe's hosted API, but the base URL is configurable: any
+    Jev-compatible endpoint works - a self-hosted Kev, a Clef systemone
+    server, a proxy. An API key is optional and only sent when set; the
+    self-hosted endpoints need none.
+    """
 
     def __init__(
         self,
         session: aiohttp.ClientSession,
-        api_key: str,
+        api_key: str | None,
         model: str,
+        base_url: str = TYPESAFE_API_URL,
     ) -> None:
         super().__init__(session, model)
         self._api_key = api_key
+        root = base_url.rstrip("/")
+        # Accept a root ("http://host:8010"), a versioned root
+        # ("http://host:8010/v1") or a full systemone URL.
+        for suffix in ("/v1/systemone", "/systemone"):
+            if root.endswith(suffix):
+                root = root[: -len(suffix)]
+                break
+        self._base_url = root
+
+    @property
+    def _systemone_url(self) -> str:
+        return f"{self._base_url}/v1/systemone"
+
+    @property
+    def _models_url(self) -> str:
+        return f"{self._base_url}/v1/models"
+
+    def _headers(self) -> dict[str, str]:
+        headers = {"Content-Type": "application/json"}
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
+        return headers
 
     async def async_validate(self) -> list[str]:
-        """Check the key and return the model names the account can use."""
+        """Check the endpoint is reachable and which models it serves."""
         try:
             async with self._session.get(
-                TYPESAFE_MODELS_URL,
-                headers={"Authorization": f"Bearer {self._api_key}"},
+                self._models_url,
+                headers=self._headers(),
                 timeout=aiohttp.ClientTimeout(total=API_TIMEOUT),
             ) as response:
                 if response.status in (401, 403):
-                    raise DecisionAuthError("Invalid TypeSafe API key")
+                    raise DecisionAuthError("The endpoint rejected the API key")
                 response.raise_for_status()
                 payload = await response.json()
         except DecisionError:
@@ -321,7 +349,7 @@ class TypeSafeDecisionClient(DecisionClient):
         except aiohttp.ClientError as err:
             raise DecisionUnavailableError(str(err)) from err
         except TimeoutError as err:
-            raise DecisionUnavailableError("Timed out reaching TypeSafe") from err
+            raise DecisionUnavailableError("Timed out reaching the endpoint") from err
         return [m["name"] for m in payload.get("models", [])]
 
     async def _ask_once(
@@ -331,12 +359,9 @@ class TypeSafeDecisionClient(DecisionClient):
         started = time.monotonic()
         try:
             async with self._session.post(
-                TYPESAFE_API_URL,
+                self._systemone_url,
                 json=body,
-                headers={
-                    "Authorization": f"Bearer {self._api_key}",
-                    "Content-Type": "application/json",
-                },
+                headers=self._headers(),
                 timeout=aiohttp.ClientTimeout(total=API_TIMEOUT),
             ) as response:
                 if response.status in (401, 403):
@@ -720,10 +745,18 @@ def create_decision_client(
     model = settings.get(CONF_MODEL) or DEFAULT_MODEL
 
     if backend == DECISION_TYPESAFE:
-        api_key = settings.get(CONF_API_KEY)
-        if not api_key:
-            return None
-        return TypeSafeDecisionClient(session, api_key, model)  # type: ignore[arg-type]
+        # The System One wire protocol. Defaults to TypeSafe's hosted API,
+        # but a base URL points it at any Jev-compatible endpoint - a
+        # self-hosted Kev, a Clef systemone server. The key is optional:
+        # self-hosted endpoints need none.
+        api_key = settings.get(CONF_API_KEY) or settings.get(CONF_DECISION_API_KEY)
+        base_url = settings.get(CONF_DECISION_BASE_URL) or TYPESAFE_API_URL
+        return TypeSafeDecisionClient(
+            session,  # type: ignore[arg-type]
+            api_key,
+            model,
+            base_url,
+        )
 
     if backend == DECISION_OPENAI:
         base_url = settings.get(CONF_DECISION_BASE_URL)

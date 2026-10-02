@@ -1,14 +1,24 @@
 {
   "domain": "typesafe_conversation",
   "name": "TypeSafe Conversation",
-  "after_dependencies": ["assist_pipeline"],
-  "codeowners": ["@the-sof"],
+  "after_dependencies": [
+    "assist_pipeline"
+  ],
+  "codeowners": [
+    "@the-sof"
+  ],
   "config_flow": true,
-  "dependencies": ["conversation", "homeassistant", "intent"],
+  "dependencies": [
+    "conversation",
+    "homeassistant",
+    "intent"
+  ],
   "documentation": "https://github.com/the-sof/home-assistant-typesafe-conversation-agent",
   "integration_type": "service",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/the-sof/home-assistant-typesafe-conversation-agent/issues",
-  "requirements": ["voluptuous-openapi>=0.4.0"],
-  "version": "0.3.2"
+  "requirements": [
+    "voluptuous-openapi>=0.4.0"
+  ],
+  "version": "0.3.3"
 }

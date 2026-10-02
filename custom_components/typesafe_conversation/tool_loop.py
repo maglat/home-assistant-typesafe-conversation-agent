@@ -214,6 +214,16 @@ def _chat_log_to_messages(chat_log: conversation.ChatLog) -> list[dict[str, Any]
     return messages
 
 
+def _json_default(value: Any) -> str:
+    """Last-resort JSON encoder for objects HA's encoder rejects.
+
+    voluptuous_openapi's converted schemas can carry sentinel objects
+    (``_Unsupported``) that HA's json_dumps refuses; they never matter on the
+    wire, so render them as their type name and move on.
+    """
+    return f"<{type(value).__name__}>"
+
+
 async def _chat_completion(
     session: aiohttp.ClientSession,
     base_url: str,
@@ -244,10 +254,16 @@ async def _chat_completion(
         "stream": False,
         "temperature": 0.3,
     }
+    # aiohttp's json= uses HA's json_dumps, whose default hook raises on the
+    # voluptuous_openapi sentinel objects that can hide inside converted tool
+    # schemas ("Type is not JSON serializable: _Unsupported"). Serialise here
+    # with a tolerant encoder instead, and send plain bytes.
+    body = json.dumps(payload, default=_json_default).encode("utf-8")
+    headers["Content-Type"] = "application/json"
     try:
         async with session.post(
             _chat_completions_url(base_url),
-            json=payload,
+            data=body,
             headers=headers,
             timeout=aiohttp.ClientTimeout(total=timeout),
         ) as response:
