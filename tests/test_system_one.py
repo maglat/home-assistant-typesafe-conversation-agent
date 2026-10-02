@@ -356,3 +356,27 @@ async def test_timeout_is_not_retried(openai_client, mocker):
     with pytest.raises(DecisionUnavailableError):
         await openai_client.async_ask({}, {})
     assert calls == 1, f"expected 1 call, got {calls}"
+
+
+async def test_openai_validate_rejects_a_systemone_endpoint(mocker):
+    """Kev answers /v1/models with a System One payload; validation must
+    reject the config instead of letting every utterance 404 later."""
+    import pytest
+
+    from custom_components.typesafe_conversation.system_one import (
+        DecisionRequestError,
+        OpenAIDecisionClient,
+    )
+
+    mocker.get(
+        "http://127.0.0.1:8000/v1/models",
+        json={"models": [{"name": "kev-latest", "device": "cuda"}]},
+    )
+    client = OpenAIDecisionClient(
+        mocker.create_session(asyncio.get_running_loop()),
+        "http://127.0.0.1:8000",
+        "kev-latest",
+        timeout=5.0,
+    )
+    with pytest.raises(DecisionRequestError):
+        await client.async_validate()

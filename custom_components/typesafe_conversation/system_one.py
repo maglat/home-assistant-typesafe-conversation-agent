@@ -616,6 +616,16 @@ class OpenAIDecisionClient(DecisionClient):
             raise DecisionUnavailableError(str(err)) from err
         except TimeoutError as err:
             raise DecisionUnavailableError("Timed out reaching the endpoint") from err
+        if "data" not in payload and "models" in payload:
+            # A System One /v1/models reply (Kev, Clef, hosted Jev): the
+            # endpoint is alive but speaks the wrong protocol for this
+            # backend. Fail loudly instead of 404-ing on every utterance.
+            raise DecisionRequestError(
+                f"{_models_url(self._base_url)} answered like a Jev/Kev "
+                "System One endpoint, not an OpenAI-compatible one. "
+                "Configure the 'TypeSafe hosted' backend with this base URL "
+                "instead."
+            )
         models = [
             m.get("id", "")
             for m in payload.get("data", [])
