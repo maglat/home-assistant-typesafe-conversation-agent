@@ -72,17 +72,12 @@ _BACKEND_OPTIONS = [
 
 
 def _decision_schema(backend: str | None) -> vol.Schema:
-    """The fields that follow the backend choice.
+    """The fields for one backend, without the backend selector itself.
 
-    The hosted backend needs only an API key; the OpenAI-compatible one takes
-    a base URL, a model name and an optional key. The model field is shown for
-    both, because TypeSafe will host more than Jev.
+    Shown by the backend-specific step; the selector lives in its own step so
+    the frontend re-renders when the user switches backends.
     """
-    fields: dict[Any, Any] = {
-        vol.Required(
-            CONF_DECISION_BACKEND, default=backend or DECISION_TYPESAFE
-        ): SelectSelector(SelectSelectorConfig(options=_BACKEND_OPTIONS)),
-    }
+    fields: dict[Any, Any] = {}
     if backend == DECISION_OPENAI:
         fields[vol.Required(CONF_DECISION_BASE_URL)] = TextSelector()
         fields[vol.Required(CONF_MODEL)] = TextSelector()
@@ -116,9 +111,43 @@ class TypeSafeConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
+        """Pick the backend. The fields follow in a backend-specific step.
+
+        The split exists because Home Assistant renders a form once: a schema
+        that changes with a select's value only re-renders after the next
+        submit, which reads as broken. Two steps make the switch explicit.
+        """
+        if user_input is not None:
+            self._data.update(user_input)
+            backend = user_input[CONF_DECISION_BACKEND]
+            return await (
+                self.async_step_openai()
+                if backend == DECISION_OPENAI
+                else self.async_step_typesafe()
+            )
+
+        return self.async_show_form(
+            step_id="user",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_DECISION_BACKEND, default=DECISION_TYPESAFE
+                    ): SelectSelector(SelectSelectorConfig(options=_BACKEND_OPTIONS)),
+                }
+            ),
+            # hassfest rejects a literal URL inside a translated string, so the
+            # console link is supplied here instead.
+            description_placeholders={"console_url": TYPESAFE_CONSOLE_URL},
+        )
+
+    async def async_step_typesafe(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Credentials for the hosted TypeSafe API."""
         errors: dict[str, str] = {}
         if user_input is not None:
-            client = _build_validator(async_get_clientsession(self.hass), user_input)
+            data = {**self._data, **user_input}
+            client = _build_validator(async_get_clientsession(self.hass), data)
             if client is None:
                 errors["base"] = "unknown"
             else:
@@ -132,16 +161,44 @@ class TypeSafeConfigFlow(ConfigFlow, domain=DOMAIN):
                     LOGGER.exception("Unexpected error validating the decision backend")
                     errors["base"] = "unknown"
                 else:
-                    self._data = dict(user_input)
+                    self._data = data
                     return await self.async_step_llm()
 
         return self.async_show_form(
-            step_id="user",
-            data_schema=_decision_schema((user_input or {}).get(CONF_DECISION_BACKEND)),
+            step_id="typesafe",
+            data_schema=_decision_schema(DECISION_TYPESAFE),
             errors=errors,
-            # hassfest rejects a literal URL inside a translated string, so the
-            # console link is supplied here instead.
             description_placeholders={"console_url": TYPESAFE_CONSOLE_URL},
+        )
+
+    async def async_step_openai(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Endpoint details for an OpenAI-compatible decision model."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            data = {**self._data, **user_input}
+            client = _build_validator(async_get_clientsession(self.hass), data)
+            if client is None:
+                errors["base"] = "unknown"
+            else:
+                try:
+                    await client.async_validate()
+                except DecisionAuthError:
+                    errors["base"] = "invalid_auth"
+                except DecisionError:
+                    errors["base"] = "cannot_connect"
+                except Exception:
+                    LOGGER.exception("Unexpected error validating the decision backend")
+                    errors["base"] = "unknown"
+                else:
+                    self._data = data
+                    return await self.async_step_llm()
+
+        return self.async_show_form(
+            step_id="openai",
+            data_schema=_decision_schema(DECISION_OPENAI),
+            errors=errors,
         )
 
     async def async_step_llm(

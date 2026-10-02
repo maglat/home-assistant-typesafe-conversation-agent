@@ -5,19 +5,10 @@
         "title": "Decision model",
         "description": "Pick which model decides every command and query. The hosted TypeSafe API (Jev) needs an API key from {console_url}. Any OpenAI-compatible endpoint works too - a self-hosted Clef, Von, Laya, or a plain LLM served by vLLM, llama.cpp or Ollama.",
         "data": {
-          "decision_backend": "Decision backend",
-          "decision_base_url": "Base URL (OpenAI-compatible)",
-          "decision_api_key": "API key (OpenAI-compatible)",
-          "decision_timeout": "Request timeout",
-          "api_key": "TypeSafe API key",
-          "model": "Model"
+          "decision_backend": "Decision backend"
         },
         "data_description": {
-          "api_key": "Your TypeSafe API key, when using the hosted backend.",
-          "decision_api_key": "Only if the endpoint needs one. Local servers usually do not.",
-          "decision_base_url": "Root of the endpoint, without /v1 - for example http://homeassistant.local:8000 or http://192.168.1.50:11434. /v1/chat/completions is appended automatically.",
-          "decision_timeout": "Seconds to wait for one decision. Self-hosted models on modest hardware need more than the hosted API.",
-          "model": "Model name as the endpoint reports it - for example jev-latest, clef-flash or qwen3.5-9b."
+          "decision_backend": "TypeSafe hosts Jev as a paid API. OpenAI-compatible covers every self-hosted decision model: Clef, Von, Laya, or a plain LLM behind vLLM, llama.cpp or Ollama."
         }
       },
       "llm": {
@@ -35,6 +26,33 @@
         "title": "Re-enter your credentials",
         "data": {
           "api_key": "TypeSafe API key"
+        }
+      },
+      "typesafe": {
+        "title": "TypeSafe credentials",
+        "description": "Create an API key at {console_url}",
+        "data": {
+          "api_key": "TypeSafe API key",
+          "model": "Model"
+        },
+        "data_description": {
+          "api_key": "Your TypeSafe API key.",
+          "model": "Jev is the only hosted model today; jev-latest follows releases."
+        }
+      },
+      "openai": {
+        "title": "OpenAI-compatible endpoint",
+        "data": {
+          "decision_base_url": "Base URL",
+          "decision_api_key": "API key (optional)",
+          "decision_timeout": "Request timeout",
+          "model": "Model"
+        },
+        "data_description": {
+          "decision_base_url": "Root of the endpoint, without /v1 - for example http://homeassistant.local:8000 or http://192.168.1.50:11434. /v1/chat/completions is appended automatically.",
+          "decision_api_key": "Only if the endpoint needs one. Local servers usually do not.",
+          "decision_timeout": "Seconds to wait for one decision. Self-hosted models on modest hardware need more than the hosted API.",
+          "model": "Model name as the endpoint reports it - for example clef-flash, von or qwen3.5-9b."
         }
       }
     },
