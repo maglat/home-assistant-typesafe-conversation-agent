@@ -20,11 +20,13 @@ from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import intent
 from homeassistant.util import dt as dt_util
 
+from . import hierarchy
 from . import questions as Q
 from .const import (
     CATALOG_SUMMARY_MAX_ENTITIES,
     DEFAULT_ALWAYS_CONFIRM_RISKY,
     LOGGER,
+    MAX_CHOICE_OPTIONS,
     MAX_HISTORY_TURNS,
 )
 from .entities import EntityCatalog
@@ -45,6 +47,10 @@ from .system_one import (
     DecisionResponse,
 )
 from .tool_loop import ToolLoopError, run_tool_loop
+
+
+class _AskForRoom(Exception):
+    """No room was named and one kind of device alone is too many to offer."""
 
 
 @dataclass(slots=True)
@@ -113,6 +119,8 @@ class TypeSafeAgent:
         speaker_area_id = self._speaker_area(user_input)
         try:
             response, entities = await self._ask(text, speaker_area_id, chat_log)
+        except _AskForRoom:
+            return self._speech(user_input, "Which room?", continue_conversation=True)
         except DecisionRequestError:
             # Our question builder produced something the API rejected. Already
             # logged with the offending field; behave as if Jev were down.
@@ -198,7 +206,15 @@ class TypeSafeAgent:
         speaker_area_id: str | None,
         chat_log: conversation.ChatLog | None,
     ) -> tuple[DecisionResponse, tuple]:
-        entities, _narrowed = self.catalog.prefilter(text, speaker_area_id)
+        """Ask everything in one call, plus a second when the home is too big.
+
+        The whole catalogue always goes in the state. Only the ``target_entity``
+        question is bounded by the server's option cap; when the home exceeds
+        it, the first call leaves that question out and ``hierarchy`` plans a
+        second one over just the likeliest devices.
+        """
+        entities = self.catalog.entities
+        max_options = MAX_CHOICE_OPTIONS
         extraction = extract(
             text,
             want_media="media_player" in self.catalog.domains,
@@ -228,7 +244,37 @@ class TypeSafeAgent:
         if chat_log is not None and (history := self._history(chat_log)):
             state["conversation"] = history
 
-        return await self.decision_client.async_ask(state, questions), entities
+        response = await self.decision_client.async_ask(state, questions)
+        if not hierarchy.needs_entity_stage(response):
+            return response, entities
+
+        plan = hierarchy.plan_entity_stage(response, entities, max_options=max_options)
+        LOGGER.debug("Entity stage for %r: %s", text, plan.trace)
+        if plan.ask_room is not None:
+            # No room was named and one kind of device alone is too many to
+            # offer. Guessing would mean acting on a device the user may not
+            # have meant, so ask instead.
+            raise _AskForRoom
+        if plan.stage is None:
+            return response, entities
+
+        # Only the candidates go in the second state: the question is which of
+        # these few devices, and a small prompt is what keeps it quick.
+        second_state: dict[str, Any] = {
+            "request": state["request"],
+            "home": self.catalog.snapshot(plan.stage.candidates),
+        }
+        if "conversation" in state:
+            second_state["conversation"] = state["conversation"]
+        second_questions = hierarchy.entity_stage_questions(
+            plan.stage,
+            inline_descriptions=self.settings.inline_entity_descriptions,
+        )
+        Q.validate_questions(second_questions)
+        second = await self.decision_client.async_ask(second_state, second_questions)
+        merged = hierarchy.merge_entity_stage(response, second, plan.stage)
+        merged.raw["entity_stage_plan"] = plan.trace
+        return merged, entities
 
     def _structural_questions(self, entities: tuple) -> dict[str, Any]:
         """Cache the catalog-derived questions against the catalog generation.

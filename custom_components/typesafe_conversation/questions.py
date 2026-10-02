@@ -428,7 +428,7 @@ def _target_area_question(areas: tuple[CatalogArea, ...]) -> Question:
     }
 
 
-def _target_entity_question(
+def target_entity_question(
     entities: tuple[CatalogEntity, ...], inline_descriptions: bool
 ) -> Question:
     if inline_descriptions:
@@ -575,7 +575,7 @@ def build_questions(
     if areas:
         questions[Q_TARGET_AREA] = _target_area_question(areas)
     if entities:
-        questions[Q_TARGET_ENTITY] = _target_entity_question(
+        questions[Q_TARGET_ENTITY] = target_entity_question(
             entities, inline_descriptions
         )
     if domains:
@@ -671,5 +671,6 @@ __all__ = [
     "action_question_id",
     "build_questions",
     "estimate_tokens",
+    "target_entity_question",
     "validate_questions",
 ]

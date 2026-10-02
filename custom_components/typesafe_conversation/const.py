@@ -136,6 +136,14 @@ states - and home-assistant.log is what gets pasted into issue reports."""
 # --- Catalog -----------------------------------------------------------------
 # The binding constraint is the API's 255-option cap on a Choice, not tokens.
 MAX_CHOICE_OPTIONS: Final = 250
+BEAM_WIDTH: Final = 2
+"""Domain/area paths kept when a home is too large for one entity question.
+
+Ported from upstream's hierarchical-classification work: when a home has more
+exposed entities than the server's option cap, the first request classifies
+domain and area, and a second, narrower request picks the entity among the
+surviving paths. The beam keeps the two most probable paths.
+"""
 MAX_HISTORY_TURNS: Final = 6
 CATALOG_SUMMARY_MAX_ENTITIES: Final = 120
 TRACE_HISTORY: Final = 20

@@ -170,6 +170,12 @@ def _confidence_from_probabilities(probabilities: dict[str, float]) -> float:
     return max(0.0, min(1.0, (n * top - 1) / (n - 1)))
 
 
+def _normalise_model_name(name: str) -> str:
+    """Ollama lists ``nimble:latest`` for a model requested as ``nimble``."""
+    name = name.strip()
+    return name[: -len(":latest")] if name.endswith(":latest") else name
+
+
 class DecisionClient(ABC):
     """One method: send a state and questions, get typed answers back.
 
@@ -344,7 +350,13 @@ class TypeSafeDecisionClient(DecisionClient):
         return headers
 
     async def async_validate(self) -> list[str]:
-        """Check the endpoint is reachable and which models it serves."""
+        """Check the endpoint is reachable and which models it serves.
+
+        TypeSafe answers ``{"models": [{"name": ...}]}``; Ollama and other
+        OpenAI-style servers answer ``{"data": [{"id": ...}]}``. Both are read,
+        and junk entries are skipped: a malformed response counts as
+        unavailable rather than as an empty model list.
+        """
         try:
             async with self._session.get(
                 self._models_url,
@@ -361,7 +373,17 @@ class TypeSafeDecisionClient(DecisionClient):
             raise DecisionUnavailableError(str(err)) from err
         except TimeoutError as err:
             raise DecisionUnavailableError("Timed out reaching the endpoint") from err
-        return [m["name"] for m in payload.get("models", [])]
+        if not isinstance(payload, dict):
+            raise DecisionUnavailableError("Unexpected model list from the endpoint")
+        names = [
+            m.get("name") for m in payload.get("models") or [] if isinstance(m, dict)
+        ]
+        names += [m.get("id") for m in payload.get("data") or [] if isinstance(m, dict)]
+        return list(
+            dict.fromkeys(
+                _normalise_model_name(n) for n in names if isinstance(n, str) and n
+            )
+        )
 
     async def _ask_once(
         self, state: Any, questions: dict[str, dict[str, Any]]
@@ -377,13 +399,15 @@ class TypeSafeDecisionClient(DecisionClient):
             ) as response:
                 if response.status in (401, 403):
                     raise DecisionAuthError("Invalid TypeSafe API key")
-                if response.status == 422:
+                if response.status in (400, 404, 413, 422):
+                    # Deterministic: the same request would fail the same way,
+                    # so retrying only burns time. The server's message names
+                    # the problem - too many options, a prompt larger than the
+                    # model's context, a missing model - so log it verbatim.
                     detail = await response.text()
-                    # Our question builder produced something invalid. The body
-                    # names the offending field, so log it loudly - the
-                    # build-time validator should have caught this.
                     raise DecisionRequestError(
-                        f"The API rejected the request: {detail}"
+                        f"The server rejected the request ({response.status}): "
+                        f"{detail[:300]}"
                     )
                 if response.status in (429, 529):
                     raise _RetryableError(
