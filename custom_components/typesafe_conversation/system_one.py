@@ -225,7 +225,10 @@ class DecisionClient(ABC):
                 response = await self._ask_once(state, questions)
             except DecisionUnavailableError as err:
                 last_error = err
-                if attempt == API_MAX_RETRIES - 1:
+                # A timeout is not retried: a model that is too slow stays
+                # too slow, and three 12s timeouts turn one slow utterance
+                # into 37s of dead air before the fallback engages.
+                if isinstance(err, _TimeoutError) or attempt == API_MAX_RETRIES - 1:
                     break
                 delay = (
                     err.retry_after
@@ -272,6 +275,12 @@ class DecisionClient(ABC):
                 self._consecutive_failures,
                 CIRCUIT_RESET_SECONDS,
             )
+
+
+class _TimeoutError(DecisionUnavailableError):
+    """The endpoint answered too slowly. Not retried: a slow model stays
+    slow, and the fallback ladder serves the user faster than a second
+    timeout would."""
 
 
 class _RetryableError(DecisionUnavailableError):
@@ -390,7 +399,7 @@ class TypeSafeDecisionClient(DecisionClient):
         except aiohttp.ClientError as err:
             raise _RetryableError(str(err)) from err
         except TimeoutError as err:
-            raise _RetryableError("Timed out talking to the System One API") from err
+            raise _TimeoutError("Timed out talking to the System One API") from err
 
         usage = payload.get("usage", {})
         return DecisionResponse(
@@ -671,7 +680,7 @@ class OpenAIDecisionClient(DecisionClient):
         except aiohttp.ClientError as err:
             raise _RetryableError(str(err)) from err
         except TimeoutError as err:
-            raise _RetryableError("Timed out talking to the decision model") from err
+            raise _TimeoutError("Timed out talking to the decision model") from err
 
         try:
             content = body["choices"][0]["message"]["content"] or ""

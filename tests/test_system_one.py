@@ -333,3 +333,26 @@ async def test_create_decision_client_typesafe_without_key_still_builds():
         settings={CONF_DECISION_BACKEND: "typesafe", CONF_MODEL: "kev-latest"},
     )
     assert isinstance(client, TypeSafeDecisionClient)
+
+
+async def test_timeout_is_not_retried(openai_client, mocker):
+    """A slow model must fail fast: one timeout, then the fallback ladder."""
+
+    import pytest
+
+    from custom_components.typesafe_conversation.system_one import (
+        DecisionUnavailableError,
+        _TimeoutError,
+    )
+
+    calls = 0
+
+    async def _slow(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        raise _TimeoutError("Timed out talking to the decision model")
+
+    openai_client._ask_once = _slow
+    with pytest.raises(DecisionUnavailableError):
+        await openai_client.async_ask({}, {})
+    assert calls == 1, f"expected 1 call, got {calls}"
