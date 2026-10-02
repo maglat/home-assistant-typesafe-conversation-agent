@@ -294,7 +294,7 @@ def _build_validator(session: Any, data: dict[str, Any]) -> DecisionClient | Non
 
 STEP_LLM_SCHEMA = vol.Schema(
     {
-        vol.Optional(CONF_LLM_BACKEND, default=BACKEND_OLLAMA): SelectSelector(
+        vol.Optional(CONF_LLM_BACKEND, default=BACKEND_OPENAI_COMPAT): SelectSelector(
             SelectSelectorConfig(
                 options=[
                     SelectOptionDict(value=BACKEND_OLLAMA, label="Ollama"),
