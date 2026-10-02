@@ -155,6 +155,37 @@ def test_sanitize_json_schema_stringifies_voluptuous_sentinels():
     assert isinstance(cleaned["required"], list)
 
 
+def test_tool_with_sentinel_parameters_gets_empty_object_schema():
+    """The 422 from the field, second round: parameters itself was the sentinel.
+
+    voluptuous_openapi returned a bare UNSUPPORTED sentinel for a tool whose
+    schema has no JSON-Schema equivalent, so the stringified value still was
+    not a dict and the server rejected the whole request.
+    """
+    import json
+
+    import custom_components.typesafe_conversation.tool_loop as tl
+    from custom_components.typesafe_conversation.tool_loop import (
+        _tool_to_openai,
+    )
+
+    class _FakeTool:
+        name = "HassListAddItem"
+        description = "Adds an item"
+        parameters = None
+
+    original = tl.convert
+    tl.convert = lambda *a, **k: "UNSUPPORTED"
+    try:
+        tool = _tool_to_openai(_FakeTool(), custom_serializer=None)
+    finally:
+        tl.convert = original
+
+    params = tool["function"]["parameters"]
+    assert isinstance(params, dict)
+    json.dumps(tool)
+
+
 def test_sanitize_json_schema_handles_primitives_and_depth():
     from custom_components.typesafe_conversation.tool_loop import (
         _sanitize_json_schema,

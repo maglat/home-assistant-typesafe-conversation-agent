@@ -48,14 +48,20 @@ def _tool_to_openai(tool: llm.Tool, custom_serializer: Any) -> dict[str, Any]:
         raise ToolLoopError(
             "voluptuous_openapi is not available in this Home Assistant build"
         )
+    parameters = _sanitize_json_schema(
+        convert(tool.parameters, custom_serializer=custom_serializer)
+    )
+    if not isinstance(parameters, dict):
+        # convert() can return a bare sentinel (rendered as "UNSUPPORTED" on
+        # the wire) for tools whose schema has no JSON-Schema equivalent.
+        # Strict servers 422 the whole request unless parameters is a dict.
+        parameters = {"type": "object", "properties": {}}
     return {
         "type": "function",
         "function": {
             "name": tool.name,
             "description": tool.description or "",
-            "parameters": _sanitize_json_schema(
-                convert(tool.parameters, custom_serializer=custom_serializer)
-            ),
+            "parameters": parameters,
         },
     }
 
