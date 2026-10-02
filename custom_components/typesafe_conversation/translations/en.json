@@ -61,7 +61,8 @@
     "error": {
       "invalid_auth": "That API key was rejected.",
       "cannot_connect": "Could not reach the decision backend.",
-      "unknown": "Unexpected error."
+      "unknown": "Unexpected error.",
+      "wrong_backend": "This endpoint answered like a Jev/Kev System One model (Kev, Clef, hosted Jev). Go back one step and choose the TypeSafe hosted backend, then enter this base URL there."
     },
     "abort": {
       "reauth_successful": "Re-authentication was successful."

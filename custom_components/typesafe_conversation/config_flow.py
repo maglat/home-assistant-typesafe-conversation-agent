@@ -60,6 +60,7 @@ from .system_one import (
     DecisionAuthError,
     DecisionClient,
     DecisionError,
+    DecisionRequestError,
 )
 
 _BACKEND_OPTIONS = [
@@ -156,6 +157,12 @@ class TypeSafeConfigFlow(ConfigFlow, domain=DOMAIN):
                     await client.async_validate()
                 except DecisionAuthError:
                     errors["base"] = "invalid_auth"
+                except DecisionRequestError as err:
+                    # A reachable endpoint that speaks the wrong protocol
+                    # (Kev behind the OpenAI backend) deserves its own
+                    # message, not a generic cannot-connect.
+                    LOGGER.warning("Decision backend rejected: %s", err)
+                    errors["base"] = "wrong_backend"
                 except DecisionError:
                     errors["base"] = "cannot_connect"
                 except Exception:
@@ -187,6 +194,12 @@ class TypeSafeConfigFlow(ConfigFlow, domain=DOMAIN):
                     await client.async_validate()
                 except DecisionAuthError:
                     errors["base"] = "invalid_auth"
+                except DecisionRequestError as err:
+                    # A reachable endpoint that speaks the wrong protocol
+                    # (Kev behind the OpenAI backend) deserves its own
+                    # message, not a generic cannot-connect.
+                    LOGGER.warning("Decision backend rejected: %s", err)
+                    errors["base"] = "wrong_backend"
                 except DecisionError:
                     errors["base"] = "cannot_connect"
                 except Exception:
