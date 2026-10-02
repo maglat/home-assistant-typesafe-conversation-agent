@@ -53,6 +53,12 @@ class AgentSettings:
     inline_entity_descriptions: bool = False
     always_confirm_risky: bool = DEFAULT_ALWAYS_CONFIRM_RISKY
     bypass_local_intents: bool = False
+    system_prompt: str = ""
+    """Extra instructions for the freeform answers, verbatim from the user.
+
+    Appended after the built-in answer prompt, so the guardrails (never claim
+    to have controlled a device, prefer the home state over guessing) survive
+    whatever the user adds - a persona, a language rule, a verbosity cap."""
 
 
 class TypeSafeAgent:
@@ -465,7 +471,7 @@ class TypeSafeAgent:
         chat_log: conversation.ChatLog,
         response: DecisionResponse | None,
     ) -> intent.IntentResponse:
-        """hassil, then the LLM, then admit defeat.
+        """hassil, then context resolution, then the LLM, then admit defeat.
 
         No intent_filter: because we advertise CONTROL, the pipeline's
         prefer-local pass withheld HassGetState and HassMediaSearchAndPlay from
@@ -482,6 +488,15 @@ class TypeSafeAgent:
         if self.llm is not None and (
             response is None or should_try_llm_answer(response)
         ):
+            # The utterance may only be unclear *in isolation*. A follow-up
+            # like "and back off again" resolves once the previous turns are
+            # in view - so let the LLM rewrite it into a standalone command
+            # and run the decision model once more on the result.
+            try:
+                return await self._resolve_context(user_input, chat_log)
+            except LLMBackendError as err:
+                LOGGER.debug("Context resolution unavailable: %s", err)
+
             try:
                 return await self._answer_freeform(user_input, chat_log)
             except LLMBackendError as err:
@@ -492,6 +507,65 @@ class TypeSafeAgent:
             intent.IntentResponseErrorCode.NO_INTENT_MATCH,
             "Sorry, I'm not sure what you'd like me to do.",
         )
+
+    async def _resolve_context(
+        self,
+        user_input: conversation.ConversationInput,
+        chat_log: conversation.ChatLog,
+    ) -> intent.IntentResponse:
+        """Rewrite a context-dependent utterance into a standalone one.
+
+        The decision model sees every turn, but it is a single-pass
+        classifier: follow-ups that only make sense with the previous turns
+        in view ("and back off again", "and the kitchen too?") score as
+        unclear. The LLM is good at exactly this, so it rewrites the
+        utterance with the history in view and the rewrite runs through the
+        normal pipeline. If nothing is left after resolving - the user was
+        chatting, not commanding - the answer path takes over.
+        """
+        history = self._history_pairs(chat_log)
+        if not history:
+            raise LLMBackendError("no history to resolve against")
+
+        rewritten = await self.llm.rewrite_with_context(
+            user_input.text, history, speaker_area=self._speaker_area_name(user_input)
+        )
+        rewritten = rewritten.strip()
+        if not rewritten or rewritten.casefold() == user_input.text.casefold():
+            # Nothing to resolve: the utterance was already standalone, so a
+            # second decision pass would only repeat the same fallback.
+            raise LLMBackendError("rewrite did not change the utterance")
+
+        LOGGER.debug("Context resolution: %r -> %r", user_input.text, rewritten)
+        try:
+            response, entities = await self._ask(
+                rewritten, self._speaker_area(user_input), None
+            )
+        except DecisionError as err:
+            raise LLMBackendError(f"decision pass failed: {err}") from err
+        plan = route(
+            response,
+            entities_by_id={e.entity_id: e for e in entities},
+            extraction=extract(
+                rewritten,
+                want_media="media_player" in self.catalog.domains,
+                want_color="light" in self.catalog.domains,
+            ),
+            speaker_area_id=self._speaker_area(user_input),
+            available_domains=frozenset(self.catalog.domains),
+            always_confirm_risky=self.settings.always_confirm_risky,
+            catalog_floors={
+                a.area_id: a.floor_name for a in self.catalog.areas if a.floor_name
+            },
+            unavailable_ids=self._unavailable_ids(),
+        )
+        if plan.route is Route.COMPOUND:
+            plan.route = Route.FALLBACK
+        if plan.route in (Route.FALLBACK, Route.COMPOUND):
+            # Still unclear with the context in view: let the freeform answer
+            # try, rather than looping through resolution again.
+            raise LLMBackendError(f"still unresolved after rewrite: {plan.reason}")
+        return await self._carry_out(plan, response, user_input, chat_log)
 
     async def _answer_freeform(
         self,
@@ -514,6 +588,7 @@ class TypeSafeAgent:
                 local_time=now.strftime("%H:%M"),
                 weekday=now.strftime("%A"),
                 speaker_area=self._speaker_area_name(user_input),
+                system_prompt=self.settings.system_prompt,
             )
         except LLMBackendError as err:
             LOGGER.warning("LLM could not answer: %s", err)

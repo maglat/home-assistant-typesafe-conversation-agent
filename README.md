@@ -218,6 +218,26 @@ beating hassil at "turn off the kitchen lights", and it concentrates the traffic
 on the requests where Jev earns its keep. Set `bypass_local_intents` if you want
 to compare the two regimes.
 
+### Follow-ups ("and back off again")
+
+The decision model is a single-pass classifier, so a follow-up that only makes
+sense with the previous turns in view scores as unclear. When that happens and
+an LLM is configured, the integration asks the LLM to rewrite the utterance
+into a standalone command with the conversation in view — "and back off again"
+plus the earlier "turn on the kitchen light" becomes "turn off the kitchen
+light" — and runs the decision model once more on the rewrite. The fast path
+is untouched: follow-ups cost one extra LLM round trip, direct commands none.
+
+If the rewrite comes back as "not a device command" (a question, a new topic),
+the prose answer takes over instead.
+
+### System prompt
+
+Each conversation agent takes an optional **system prompt** (per-subentry
+option): extra instructions for the general-knowledge answers — a persona, a
+language rule, how brief to be. It is appended *after* the built-in
+guardrails, so it cannot make the assistant claim to have controlled a device.
+
 ## Debugging
 
 ### Is the agent even being asked?

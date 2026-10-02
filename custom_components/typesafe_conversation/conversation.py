@@ -16,6 +16,7 @@ from .const import (
     CONF_ALWAYS_CONFIRM_RISKY,
     CONF_BYPASS_LOCAL_INTENTS,
     CONF_INLINE_ENTITY_DESCRIPTIONS,
+    CONF_SYSTEM_PROMPT,
     DEFAULT_ALWAYS_CONFIRM_RISKY,
     DOMAIN,
 )
@@ -108,6 +109,7 @@ class TypeSafeConversationEntity(
                     )
                 ),
                 bypass_local_intents=bool(settings.get(CONF_BYPASS_LOCAL_INTENTS)),
+                system_prompt=str(settings.get(CONF_SYSTEM_PROMPT) or ""),
             ),
             traces=data.traces,
         )

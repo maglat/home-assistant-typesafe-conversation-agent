@@ -91,6 +91,34 @@ class LLMBackendError(Exception):
     """Any failure talking to the configured LLM."""
 
 
+CONTEXT_SYSTEM_PROMPT = """\
+You resolve follow-up requests in a smart-home voice conversation.
+
+You get the last exchanges and the newest utterance. The newest utterance may
+use words like "it", "there", "also", "too", or "again" that only make sense
+with the earlier turns in view.
+
+Rewrite the newest utterance as ONE short standalone command that a device
+control system can carry out without any of that context. Keep the user's
+language. Examples:
+
+history: user "turn on the kitchen light", assistant "Done."
+utterance: "and back off again"
+output: turn off the kitchen light
+
+history: user "set the thermostat to 21 degrees", assistant "Done."
+utterance: "and the living room too"
+output: set the living room thermostat to 21 degrees
+
+history: user "play some jazz", assistant "Playing jazz."
+utterance: "louder"
+output: turn the volume up
+
+If the utterance is not about controlling the home - a question, a new topic,
+general chat - output exactly: NONE
+Output ONLY the rewritten command or NONE. No quotes, no explanation."""
+
+
 class LLMBackend(ABC):
     """Two operations. Nothing else is ever asked of the LLM."""
 
@@ -182,6 +210,7 @@ class LLMBackend(ABC):
         local_time: str,
         weekday: str,
         speaker_area: str | None,
+        system_prompt: str = "",
     ) -> str:
         """Answer a general or prose question in natural language."""
         system = ANSWER_SYSTEM_PROMPT.format(
@@ -190,6 +219,10 @@ class LLMBackend(ABC):
             speaker_area=speaker_area or "an unknown room",
             home_state=home_state,
         )
+        if system_prompt.strip():
+            # User instructions come after the built-in guardrails, so a
+            # persona or a language rule cannot override the safety lines.
+            system = f"{system}\n\nAdditional instructions:\n{system_prompt.strip()}"
         messages: list[dict[str, str]] = [{"role": "system", "content": system}]
         for user_text, assistant_text in history:
             messages.append({"role": "user", "content": user_text})
@@ -205,6 +238,42 @@ class LLMBackend(ABC):
         )
         _log_exchange("answer", self.name, self._model, messages, text, metrics)
         return text.strip()
+
+    async def rewrite_with_context(
+        self,
+        utterance: str,
+        history: list[tuple[str, str]],
+        *,
+        speaker_area: str | None = None,
+    ) -> str:
+        """Rewrite a follow-up utterance into a standalone command.
+
+        Returns the rewritten command, or raises LLMBackendError when there is
+        nothing to resolve - the caller then falls through to the prose
+        answer. Never raises for network problems; those surface as
+        LLMBackendError too, and the fallback ladder absorbs them.
+        """
+        lines: list[str] = []
+        for user_text, assistant_text in history:
+            lines.append(f'user: "{user_text}"')
+            if assistant_text:
+                lines.append(f'assistant: "{assistant_text}"')
+        if speaker_area:
+            lines.append(f"(the speaker is in the {speaker_area})")
+        lines.append(f'newest utterance: "{utterance}"')
+
+        messages = [
+            {"role": "system", "content": CONTEXT_SYSTEM_PROMPT},
+            {"role": "user", "content": "\n".join(lines)},
+        ]
+        raw, metrics = await self._chat(
+            messages,
+            max_tokens=SPLIT_MAX_TOKENS,
+            temperature=0.0,
+            timeout=SPLIT_TIMEOUT,
+        )
+        _log_exchange("rewrite", self.name, self._model, messages, raw, metrics)
+        return raw.strip()
 
 
 class OllamaBackend(LLMBackend):

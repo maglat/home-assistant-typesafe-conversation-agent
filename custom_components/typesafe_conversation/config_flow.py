@@ -44,6 +44,7 @@ from .const import (
     CONF_LLM_MODEL,
     CONF_LLM_TIMEOUT,
     CONF_MODEL,
+    CONF_SYSTEM_PROMPT,
     DECISION_OPENAI,
     DECISION_TYPESAFE,
     DEFAULT_ALWAYS_CONFIRM_RISKY,
@@ -293,6 +294,12 @@ class TypeSafeSubentryFlowHandler(ConfigSubentryFlow):
                     CONF_INLINE_ENTITY_DESCRIPTIONS,
                     default=current.get(CONF_INLINE_ENTITY_DESCRIPTIONS, False),
                 ): BooleanSelector(),
+                vol.Optional(
+                    CONF_SYSTEM_PROMPT,
+                    default=current.get(CONF_SYSTEM_PROMPT, ""),
+                ): TextSelector(
+                    TextSelectorConfig(type=TextSelectorType.TEXT, multiline=True)
+                ),
                 vol.Optional(
                     CONF_BYPASS_LOCAL_INTENTS,
                     default=current.get(CONF_BYPASS_LOCAL_INTENTS, False),

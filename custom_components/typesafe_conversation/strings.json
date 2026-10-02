@@ -60,12 +60,14 @@
             "name": "Name",
             "always_confirm_risky": "Always confirm before unlocking or opening",
             "inline_entity_descriptions": "Describe every entity inside the question",
-            "bypass_local_intents": "Handle every command, including ones Home Assistant recognises"
+            "bypass_local_intents": "Handle every command, including ones Home Assistant recognises",
+            "system_prompt": "System prompt (optional)"
           },
           "data_description": {
             "always_confirm_risky": "Ask first before unlocking a door, opening a garage or disarming an alarm, however sure the model is. Turning this off lets confident requests through silently.",
             "inline_entity_descriptions": "Costs roughly twice the tokens. Only worth turning on if the agent picks the wrong device.",
-            "bypass_local_intents": "By default Home Assistant's own sentence matcher keeps the phrasings it recognises, and only sends the rest here. Turn this on to send everything here instead."
+            "bypass_local_intents": "By default Home Assistant's own sentence matcher keeps the phrasings it recognises, and only sends the rest here. Turn this on to send everything here instead.",
+            "system_prompt": "Extra instructions for general-knowledge answers - a persona, a language rule, how brief to be. Appended after the built-in safety rules, so it cannot make the assistant claim to have controlled a device. Only used when a language model is configured."
           }
         }
       }
